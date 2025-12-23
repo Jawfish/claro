@@ -9,11 +9,36 @@ Claro is a modern, async-first Python test framework inspired by Jest/Vitest. It
 ## Commands
 
 ```bash
-uv run python -m claro          # Run tests (once CLI is implemented)
-uv run pytest                   # Run claro's own tests (if using pytest for self-testing)
+uv run claro                    # Run all tests in current directory
+uv run claro src/claro          # Run tests in specific directory
+uv run claro -t 5.0             # Run with 5 second timeout per test
 uv add <package>                # Add dependency
 uv sync                         # Sync dependencies
 ```
+
+## Module Structure
+
+```
+src/claro/
+├── __init__.py       # Public API exports
+├── types.py          # Data classes, enums (Suite, Test, TestResult, etc.)
+├── decorators.py     # @suite, @test, @before_each, etc. + global registry
+├── assertions.py     # expect() and Expectation class
+├── runner.py         # Async test execution engine
+├── discovery.py      # Test file discovery and import
+├── output.py         # Colors, formatting, reporting
+└── cli.py            # argparse CLI entry point
+```
+
+## Test File Convention
+
+Tests are colocated with source files using `*_test.py` suffix:
+```
+src/claro/assertions.py      → src/claro/assertions_test.py
+src/claro/runner.py          → src/claro/runner_test.py
+```
+
+Only the `*_test.py` pattern is matched (not `test_*.py`).
 
 ## Architecture
 
@@ -50,7 +75,25 @@ Test
 └── params: tuple | dict | None # For parametrized tests
 ```
 
-### Helper Pattern
+### Execution Flow
+
+```
+CLI (argparse)
+    ↓
+discovery.collect_tests(path, patterns)
+    ↓ discover files matching patterns
+    ↓ import each file (triggers @suite decorator)
+    ↓ return get_suites()
+    ↓
+runner.run(suites, timeout)
+    ↓ for each suite: run_suite()
+    ↓   parallel (TaskGroup) or sequential execution
+    ↓   lifecycle: before_all → (before_each → test → after_each)* → after_all
+    ↓
+output.format_summary() → stdout
+```
+
+### Helper Patterns
 
 - `maybe_await(fn, *args)`: Calls function and awaits if result is awaitable
 - `timeout_context(seconds)`: Async context manager wrapping `asyncio.timeout()`
@@ -62,7 +105,7 @@ Test
 ### Output
 
 - `Colors` class with TTY detection and NO_COLOR/FORCE_COLOR support
-- `print_diff()` for unified diff output on failures
+- `format_diff()` for unified diff output on failures
 - Status icons: ✓ passed, ✗ failed, ○ skipped, ◌ todo
 
 ## Design Principles
@@ -70,4 +113,4 @@ Test
 - Pure functions where possible (assertions, formatting)
 - No mocks in tests - use real implementations or fakes
 - Structured concurrency with TaskGroup for proper cancellation
-- Branded types for domain concepts (consider for TestId, SuiteId, etc.)
+- Claro tests itself (dogfooding)
