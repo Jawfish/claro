@@ -1,13 +1,22 @@
 """Tests for the CLI module."""
 
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
 from claro import after_each, before_each, clear_suites, expect, suite, test
-from claro.cli import create_parser, main
-from claro.decorators import _suites, _suites_lock
+from claro.cli import create_parser
 from claro.output import Colors
+
+
+def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run the claro CLI as a subprocess."""
+    return subprocess.run(
+        [sys.executable, "-m", "claro.cli", *args],
+        capture_output=True,
+        text=True,
+    )
 
 
 @suite
@@ -143,57 +152,41 @@ class MainColorConfigurationTests:
             Colors._enabled = original
 
 
-# Tests that call main() modify the global _suites registry
-# so they use before_each/after_each to save/restore state
+# CLI integration tests using subprocess
 @suite
-class MainFunctionTests:
-    _shared: dict[str, Any]
-
-    @before_each
-    def setup(self):
-        with _suites_lock:
-            self._shared["original_suites"] = _suites.copy()
-        Colors.disable()
-
-    @after_each
-    def teardown(self):
-        with _suites_lock:
-            _suites.clear()
-            _suites.extend(self._shared["original_suites"])
-        Colors.reset_detection()
-
+class CLIIntegrationTests:
     # Path validation tests
     @test
     def nonexistent_path_returns_exit_code_one(self):
-        result = main(["/nonexistent/path/xyz"])
-        expect(result).to_be(1)
+        result = run_cli("/nonexistent/path/xyz")
+        expect(result.returncode).to_be(1)
 
     @test
     def file_path_returns_exit_code_one(self):
         with tempfile.NamedTemporaryFile() as f:
-            result = main([f.name])
-            expect(result).to_be(1)
+            result = run_cli(f.name)
+            expect(result.returncode).to_be(1)
 
     @test
     def valid_directory_is_accepted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            result = main([temp_dir])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
 
     # Empty directory tests
     @test
     def empty_directory_returns_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            result = main([temp_dir])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
 
     @test
     def directory_with_no_test_files_returns_zero(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             # Create a non-test file
             Path(temp_dir, "regular.py").write_text("x = 1")
-            result = main([temp_dir])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
 
     # Test execution tests
     @test
@@ -209,8 +202,8 @@ class PassingTests:
     def always_passes(self):
         expect(1 + 1).to_be(2)
 """)
-            result = main([temp_dir])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
 
     @test
     def failing_test_returns_one(self):
@@ -225,8 +218,8 @@ class FailingTests:
     def always_fails(self):
         expect(1).to_be(2)
 """)
-            result = main([temp_dir])
-            expect(result).to_be(1)
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(1)
 
     # Pattern filtering tests
     @test
@@ -243,8 +236,8 @@ class SpecTests:
     def passes(self):
         expect(True).to_be_truthy()
 """)
-            result = main([temp_dir, "-p", "*_spec.py"])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir, "-p", "*_spec.py")
+            expect(result.returncode).to_be(0)
 
     @test
     def non_matching_pattern_finds_no_tests(self):
@@ -261,9 +254,9 @@ class Tests:
         expect(True).to_be_truthy()
 """)
             # Use pattern that doesn't match
-            result = main([temp_dir, "-p", "*_spec.py"])
+            result = run_cli(temp_dir, "-p", "*_spec.py")
             # Returns 0 because no tests found is not a failure
-            expect(result).to_be(0)
+            expect(result.returncode).to_be(0)
 
     # Timeout configuration tests
     @test
@@ -279,5 +272,74 @@ class QuickTests:
     def fast_test(self):
         expect(1).to_be(1)
 """)
-            result = main([temp_dir, "-t", "5.0"])
-            expect(result).to_be(0)
+            result = run_cli(temp_dir, "-t", "5.0")
+            expect(result.returncode).to_be(0)
+
+    # Only mode tests
+    @test
+    def only_mode_runs_focused_tests_exclusively(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir, "only_test.py")
+            test_file.write_text("""
+from claro import suite, test, expect
+
+@suite
+class MixedTests:
+    @test.only
+    def focused_test(self):
+        expect(1).to_be(1)
+
+    @test
+    def normal_test(self):
+        raise Exception("This should not run")
+""")
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
+            expect(result.stdout).to_contain("focused_test")
+
+    # Skip mode tests
+    @test
+    def skipped_tests_are_not_executed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir, "skip_test.py")
+            test_file.write_text("""
+from claro import suite, test, expect
+
+@suite
+class SkipTests:
+    @test.skip
+    def skipped_test(self):
+        raise Exception("This should not run")
+
+    @test
+    def normal_test(self):
+        expect(1).to_be(1)
+""")
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)
+            expect(result.stdout).to_contain("skipped")
+
+    # Before_all tests
+    @test
+    def before_all_runs_once_for_multiple_tests(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_file = Path(temp_dir, "before_all_test.py")
+            test_file.write_text("""
+from claro import suite, test, expect, before_all
+
+@suite
+class BeforeAllTests:
+    @before_all
+    def setup_suite(ctx):
+        ctx['counter'] = ctx.get('counter', 0) + 1
+
+    @test
+    def test_one(self):
+        expect(self._shared['counter']).to_be(1)
+
+    @test
+    def test_two(self):
+        expect(self._shared['counter']).to_be(1)
+""")
+            result = run_cli(temp_dir)
+            expect(result.returncode).to_be(0)

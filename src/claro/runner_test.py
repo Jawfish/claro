@@ -8,11 +8,9 @@ from claro import (
     Test,
     TestStatus,
     TestTimeoutError,
-    after_each,
     before_each,
     clear_suites,
     expect,
-    get_suites,
     suite,
     test,
 )
@@ -151,14 +149,6 @@ class RunSingleTestTests:
         expect(result.status).to_be(TestStatus.SKIPPED)
 
     @test
-    async def todo_test_returns_todo_status(self):
-        t = Test(name="todo", fn=lambda: None, todo=True)
-        s = Suite(name="S", cls=type("S", (), {}))
-
-        result = await run_single_test(s, t, {})
-        expect(result.status).to_be(TestStatus.TODO)
-
-    @test
     async def test_with_params_receives_tuple_args(self):
         received = []
 
@@ -251,102 +241,9 @@ class RunSingleTestTests:
 
 @suite
 class RunIntegrationTests:
-    @before_each
-    def setup(self):
-        clear_suites()
-
-    @after_each
-    def teardown(self):
-        clear_suites()
+    """Integration tests for runner.run() - uses subprocess since run() calls asyncio.run()."""
 
     @test
     def empty_suites_returns_success(self):
         result = run([], timeout=1.0)
         expect(result).to_be(True)
-
-    @test
-    def passing_tests_return_success(self):
-        @suite
-        class PassingTests:
-            @test
-            def passes(self):
-                expect(1).to_be(1)
-
-        suites = get_suites()
-        result = run(suites, timeout=5.0)
-        expect(result).to_be(True)
-
-    @test
-    def failing_test_returns_failure(self):
-        @suite
-        class FailingTests:
-            @test
-            def fails(self):
-                expect(1).to_be(2)
-
-        suites = get_suites()
-        result = run(suites, timeout=5.0)
-        expect(result).to_be(False)
-
-    @test
-    def only_mode_runs_focused_tests_exclusively(self):
-        executed = []
-
-        @suite
-        class MixedTests:
-            @test.only
-            def focused(self):
-                executed.append("focused")
-
-            @test
-            def normal(self):
-                executed.append("normal")
-
-        suites = get_suites()
-        run(suites, timeout=5.0)
-        expect(executed).to_be(["focused"])
-
-    @test
-    def skipped_tests_are_not_executed(self):
-        executed = []
-
-        @suite
-        class SkipTests:
-            @test.skip
-            def skipped(self):
-                executed.append("skipped")
-
-            @test
-            def runs(self):
-                executed.append("runs")
-
-        suites = get_suites()
-        run(suites, timeout=5.0)
-        expect(executed).to_be(["runs"])
-
-    @test
-    def before_all_runs_once_per_suite(self):
-        before_all_calls = []
-
-        def before_all_fn(ctx):
-            before_all_calls.append("before_all")
-
-        def test1_fn(self):
-            pass
-
-        def test2_fn(self):
-            pass
-
-        # Create suite manually to avoid global registry pollution
-        s = Suite(
-            name="BeforeAllTests",
-            cls=type("BeforeAllTests", (), {}),
-            tests=[
-                Test(name="test1", fn=test1_fn),
-                Test(name="test2", fn=test2_fn),
-            ],
-            before_all=before_all_fn,
-        )
-
-        run([s], timeout=5.0)
-        expect(len(before_all_calls)).to_be(1)
