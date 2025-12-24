@@ -33,7 +33,6 @@ class Test:
     name: str
     fn: Callable[..., Any | Awaitable[Any]]
     skip: bool = False
-    only: bool = False
     skip_reason: str | None = None
     timeout: float | None = None
     params: tuple[Any, ...] | dict[str, Any] | None = None

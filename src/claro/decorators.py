@@ -62,7 +62,6 @@ TestDecorator = Callable[[Callable[..., Any]], Callable[..., Any]]
 def _make_decorator(
     *,
     skip: bool = False,
-    only: bool = False,
     skip_reason: str | None = None,
     timeout_seconds: float | None = None,
     params: list[Any] | None = None,
@@ -72,7 +71,6 @@ def _make_decorator(
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         fn._is_test = True  # type: ignore[attr-defined]
         fn._skip = skip  # type: ignore[attr-defined]
-        fn._only = only  # type: ignore[attr-defined]
         fn._skip_reason = skip_reason  # type: ignore[attr-defined]
         fn._timeout = timeout_seconds  # type: ignore[attr-defined]
         fn._params = params  # type: ignore[attr-defined]
@@ -93,9 +91,6 @@ class _TestMarker:
 
         @test.skip
         def skipped_test(self): ...
-
-        @test.only
-        def focused_test(self): ...
 
         @test.skip_if(condition, "reason")
         def conditional_test(self): ...
@@ -118,11 +113,6 @@ class _TestMarker:
     def skip(self) -> TestDecorator:
         """Mark test as skipped."""
         return _make_decorator(skip=True)
-
-    @property
-    def only(self) -> TestDecorator:
-        """Mark test to run exclusively (focus mode)."""
-        return _make_decorator(only=True)
 
     def skip_if(self, condition: bool, reason: str = "") -> TestDecorator:
         """Conditionally skip test if condition is true."""
@@ -207,7 +197,6 @@ def _create_test(
         name=name,
         fn=fn,
         skip=getattr(fn, "_skip", False),
-        only=getattr(fn, "_only", False),
         skip_reason=getattr(fn, "_skip_reason", None),
         timeout=getattr(fn, "_timeout", None),
         params=params,
@@ -302,61 +291,3 @@ def suite(
     return decorator
 
 
-# ============== Custom Matcher Decorator ==============
-
-
-def matcher(fn: Callable[..., bool | tuple[bool, str]]) -> Any:
-    """
-    Decorator to create custom matchers from simple functions.
-
-    The decorated function should take (value, *args, **kwargs) and return
-    either a bool, or a tuple of (bool, message).
-
-    Usage:
-        @matcher
-        def is_even(value):
-            return value % 2 == 0, f"expected {value} to be even"
-
-        @matcher
-        def is_weekday(value, day):
-            return value.weekday() == day
-
-        # Use with expect().to_satisfy()
-        expect(4).to_satisfy(is_even)
-        expect(date).to_satisfy(is_weekday(5))  # Saturday
-    """
-    fn_name = getattr(fn, "__name__", "matcher")
-
-    def wrapper(*args: Any, **kwargs: Any) -> Callable[[Any], tuple[bool, str]]:
-        def check(value: Any) -> tuple[bool, str]:
-            result = fn(value, *args, **kwargs)
-            if isinstance(result, tuple):
-                return result  # (bool, message)
-            # Auto-generate message from function name
-            name = fn_name.replace("_", " ")
-            return result, f"expected value to satisfy: {name}"
-
-        return check
-
-    # Allow calling without args for simple matchers
-    if not _args_required(fn):
-        wrapper._no_args = True  # type: ignore[attr-defined]
-
-    wrapper._matcher_fn = fn  # type: ignore[attr-defined]
-    return wrapper
-
-
-def _args_required(fn: Callable[..., Any]) -> bool:
-    """Check if function requires args beyond the first (value) parameter."""
-    import inspect
-
-    sig = inspect.signature(fn)
-    params = list(sig.parameters.values())
-    # Skip first param (value), check if others have no defaults
-    for p in params[1:]:
-        if p.default is inspect.Parameter.empty and p.kind not in (
-            inspect.Parameter.VAR_POSITIONAL,
-            inspect.Parameter.VAR_KEYWORD,
-        ):
-            return True
-    return False

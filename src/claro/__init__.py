@@ -8,7 +8,6 @@ from .decorators import (
     before_each,
     clear_suites,
     get_suites,
-    matcher,
     suite,
     test,
 )
@@ -28,7 +27,6 @@ __all__ = [
     # Decorators
     "suite",
     "test",
-    "matcher",
     "before_each",
     "after_each",
     "before_all",

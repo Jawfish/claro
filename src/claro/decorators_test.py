@@ -8,7 +8,6 @@ from claro import (
     clear_suites,
     expect,
     get_suites,
-    matcher,
     suite,
     test,
 )
@@ -92,17 +91,6 @@ class TestModifierTests:
 
         suites = get_suites()
         expect(suites[0].tests[0].skip).to_be(True)
-
-    @test
-    def only_marks_test_as_focused(self):
-        @suite
-        class FocusedTests:
-            @test.only
-            def focused_test(self):
-                pass
-
-        suites = get_suites()
-        expect(suites[0].tests[0].only).to_be(True)
 
 
 @suite
@@ -304,52 +292,6 @@ class LifecycleDecoratorTests:
 
         suites = get_suites()
         expect(suites[0].after_all).not_.to_be_none()
-
-
-@suite
-class MatcherDecoratorTests:
-    @test
-    def matcher_creates_callable_check(self):
-        @matcher
-        def is_positive(value):
-            return value > 0
-
-        check = is_positive()
-        result, _ = check(5)
-        expect(result).to_be(True)
-
-    @test
-    def matcher_returns_false_for_failing_check(self):
-        @matcher
-        def is_positive(value):
-            return value > 0
-
-        check = is_positive()
-        result, _ = check(-5)
-        expect(result).to_be(False)
-
-    @test
-    def matcher_with_custom_message_returns_message(self):
-        @matcher
-        def is_even(value):
-            return value % 2 == 0, f"expected {value} to be even"
-
-        check = is_even()
-        result, message = check(3)
-        expect(result).to_be(False)
-        expect(message).to_be("expected 3 to be even")
-
-    @test
-    def matcher_with_args_receives_arguments(self):
-        @matcher
-        def is_divisible_by(value, divisor):
-            return value % divisor == 0
-
-        check = is_divisible_by(3)
-        result_true, _ = check(9)
-        result_false, _ = check(7)
-        expect(result_true).to_be(True)
-        expect(result_false).to_be(False)
 
 
 @suite

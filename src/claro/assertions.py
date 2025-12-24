@@ -358,39 +358,6 @@ class Expectation:
             show_diff=False,
         )
 
-    # ===== Custom Matchers =====
-
-    def to_satisfy(self, matcher_or_check: Any) -> None:
-        """
-        Assert value satisfies a custom matcher.
-
-        Usage:
-            @matcher
-            def is_even(value):
-                return value % 2 == 0, f"expected {value} to be even"
-
-            expect(4).to_satisfy(is_even)
-            expect(5).to_satisfy(is_even)  # Fails
-        """
-        # Handle @matcher decorated functions
-        if hasattr(matcher_or_check, "_no_args"):
-            # No-arg matcher: is_even -> is_even()
-            check_fn = matcher_or_check()
-        elif callable(matcher_or_check):
-            check_fn = matcher_or_check
-        else:
-            msg = "to_satisfy requires a matcher or callable"
-            raise TypeError(msg)
-
-        result = check_fn(self.value)
-        if isinstance(result, tuple):
-            passed, message = result
-        else:
-            passed = bool(result)
-            message = f"custom matcher returned {passed}"
-
-        self._check(passed, message, show_diff=False)
-
     # ===== Exceptions =====
 
     def _check_exception(

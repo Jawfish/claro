@@ -1,6 +1,6 @@
 """Tests for the assertions module."""
 
-from claro import ExpectationError, expect, matcher, suite, test
+from claro import ExpectationError, expect, suite, test
 
 
 @suite
@@ -462,63 +462,6 @@ class ContainStringTests:
         expect(lambda: expect("hello").to_contain_string("world")).to_raise_sync(
             ExpectationError
         )
-
-
-@suite
-class CustomMatcherTests:
-    @test
-    def to_satisfy_with_simple_callable(self):
-        def is_positive(value):
-            return value > 0
-
-        expect(5).to_satisfy(is_positive)
-
-    @test
-    def to_satisfy_fails_when_callable_returns_false(self):
-        def is_positive(value):
-            return value > 0
-
-        expect(lambda: expect(-5).to_satisfy(is_positive)).to_raise_sync(
-            ExpectationError
-        )
-
-    @test
-    def to_satisfy_with_tuple_result(self):
-        def is_even(value):
-            return value % 2 == 0, f"expected {value} to be even"
-
-        expect(4).to_satisfy(is_even)
-
-    @test
-    def to_satisfy_with_tuple_result_fails(self):
-        def is_even(value):
-            return value % 2 == 0, f"expected {value} to be even"
-
-        expect(lambda: expect(5).to_satisfy(is_even)).to_raise_sync(ExpectationError)
-
-    @test
-    def to_satisfy_with_matcher_decorator(self):
-        @matcher
-        def is_divisible_by(value, divisor):
-            return (
-                value % divisor == 0,
-                f"expected {value} to be divisible by {divisor}",
-            )
-
-        expect(10).to_satisfy(is_divisible_by(5))
-
-    @test
-    def to_satisfy_with_no_arg_matcher(self):
-        @matcher
-        def is_positive(value):
-            return value > 0, f"expected {value} to be positive"
-
-        # No-arg matchers can be passed directly without calling
-        expect(5).to_satisfy(is_positive)
-
-    @test
-    def to_satisfy_rejects_non_callable(self):
-        expect(lambda: expect(5).to_satisfy("not a callable")).to_raise_sync(TypeError)
 
 
 @suite

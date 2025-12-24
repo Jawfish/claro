@@ -15,7 +15,6 @@ from claro import (
     test,
 )
 from claro.runner import (
-    _has_only_tests,
     maybe_await,
     run,
     run_single_test,
@@ -88,26 +87,6 @@ class TimeoutContextTests:
             expect(e.timeout).to_be(0.001)
 
         expect(raised).to_be(True)
-
-
-@suite
-class HasOnlyTestsTests:
-    @test
-    def suite_with_only_test_is_detected(self):
-        t = Test(name="focused", fn=lambda: None, only=True)
-        s = Suite(name="FocusedSuite", cls=object, tests=[t])
-        expect(_has_only_tests(s)).to_be(True)
-
-    @test
-    def suite_without_only_tests_is_not_flagged(self):
-        t = Test(name="normal", fn=lambda: None, only=False)
-        s = Suite(name="NormalSuite", cls=object, tests=[t])
-        expect(_has_only_tests(s)).to_be(False)
-
-    @test
-    def empty_suite_has_no_only_tests(self):
-        s = Suite(name="Empty", cls=object, tests=[])
-        expect(_has_only_tests(s)).to_be(False)
 
 
 @suite

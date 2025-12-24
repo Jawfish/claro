@@ -22,19 +22,12 @@ Claro is a well-designed async-first test framework with clean architecture and 
 10. ~~**`_run_silent` threading workaround**~~ - Removed, tests use subprocess
 11. ~~**Sequential mode**~~ - Removed, always run tests in parallel
 12. ~~**`would_fail` / soft assertions**~~ - Removed, unclear use case
+13. ~~**Custom matcher system**~~ - Removed `@matcher` + `to_satisfy()`, users can use plain functions
+14. ~~**`@test.only` focus mode**~~ - Removed, single-test running should be via CLI `--match` flag (TODO)
 
 ### Remaining Issues
 
-13. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
-
-### Potential Over-Engineering (Undecided)
-
-14. **Custom matcher system** (`@matcher` + `to_satisfy()`) (decorators.py:308-346, assertions.py:373-402, ~80 lines)
-    - Allows creating custom matchers: `@matcher def is_even(value): return value % 2 == 0`
-    - Used via `expect(4).to_satisfy(is_even)`
-    - Requires learning a protocol (return bool or tuple of bool+message)
-    - Users can achieve the same with plain functions: `expect(is_even(4)).to_be(True)`
-    - YAGNI - adds API surface for extensibility that hasn't been requested
+15. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
 
 ---
 
@@ -185,7 +178,7 @@ Only 0 (success) and 1 (failure). Should distinguish:
 
 ### Current State: Good
 
-All 246 tests pass. Framework successfully tests itself.
+All 230 tests pass. Framework successfully tests itself.
 
 | Module | Test Status | Key Gaps |
 |--------|-------------|----------|
@@ -227,12 +220,12 @@ All 246 tests pass. Framework successfully tests itself.
 
 | File | Lines | Status | Primary Issues |
 |------|-------|--------|----------------|
-| types.py | 93 | ✓ Good | None |
-| decorators.py | 362 | ✓ Good | None |
-| runner.py | 372 | ✓ Good | None |
-| assertions.py | 458 | ✓ Good | None |
+| types.py | 92 | ✓ Good | None |
+| decorators.py | 293 | ✓ Good | None |
+| runner.py | 352 | ✓ Good | None |
+| assertions.py | 415 | ✓ Good | None |
 | discovery.py | 124 | ✓ Good | Security concerns |
 | output.py | 203 | ✓ Good | None |
 | cli.py | 106 | ✓ Good | Missing features |
 | enhance.py | 103 | ✓ Good | None |
-| __init__.py | 52 | ✓ Good | None |
+| __init__.py | 50 | ✓ Good | None |

@@ -47,7 +47,7 @@ Only the `*_test.py` pattern is matched (not `test_*.py`).
 The framework follows a decorator-based API pattern:
 
 1. **Suite/Test Registration**: `@suite` class decorator registers test classes, `@test` method decorator marks test methods
-2. **Test Modifiers**: `@test.skip`, `@test.only`, `@test.todo`, `@test.timeout()`, `@test.each([...])`
+2. **Test Modifiers**: `@test.skip`, `@test.skip_if()`, `@test.timeout()`, `@test.each([...])`
 3. **Lifecycle Hooks**: `@before_each`, `@after_each`, `@before_all`, `@after_all`
 4. **Assertions**: Fluent `expect(value).to_be(expected)` API with chainable `.not_`
 
@@ -55,7 +55,6 @@ The framework follows a decorator-based API pattern:
 
 - **Async-first**: All tests run in asyncio event loop, sync tests are automatically awaited
 - **Parallel by default**: Tests within a suite run concurrently using `asyncio.TaskGroup`
-- **Sequential mode**: `@suite(sequential=True)` for tests that can't run in parallel
 - **Timeout handling**: Per-test, per-suite, and global timeouts via `asyncio.timeout()`
 
 ### Key Data Structures
@@ -63,14 +62,13 @@ The framework follows a decorator-based API pattern:
 ```
 Suite
 ├── tests: list[Test]           # Test cases in this suite
-├── children: list[Suite]       # Nested suites
 ├── before_each/after_each      # Per-test lifecycle
 ├── before_all/after_all        # Per-suite lifecycle
-└── mode: RunMode               # PARALLEL or SEQUENTIAL
+└── timeout: float | None       # Suite-level timeout
 
 Test
 ├── fn: Callable                # The test function
-├── skip/only/todo: bool        # Test modifiers
+├── skip: bool                  # Skip this test
 ├── timeout: float | None       # Test-specific timeout
 └── params: tuple | dict | None # For parametrized tests
 ```
@@ -87,7 +85,7 @@ discovery.collect_tests(path, patterns)
     ↓
 runner.run(suites, timeout)
     ↓ for each suite: run_suite()
-    ↓   parallel (TaskGroup) or sequential execution
+    ↓   parallel execution via TaskGroup
     ↓   lifecycle: before_all → (before_each → test → after_each)* → after_all
     ↓
 output.format_summary() → stdout
@@ -106,7 +104,7 @@ output.format_summary() → stdout
 
 - `Colors` class with TTY detection and NO_COLOR/FORCE_COLOR support
 - `format_diff()` for unified diff output on failures
-- Status icons: ✓ passed, ✗ failed, ○ skipped, ◌ todo
+- Status icons: ✓ passed, ✗ failed, ○ skipped
 
 ## Design Principles
 

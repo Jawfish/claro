@@ -275,28 +275,6 @@ class QuickTests:
             result = run_cli(temp_dir, "-t", "5.0")
             expect(result.returncode).to_be(0)
 
-    # Only mode tests
-    @test
-    def only_mode_runs_focused_tests_exclusively(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            test_file = Path(temp_dir, "only_test.py")
-            test_file.write_text("""
-from claro import suite, test, expect
-
-@suite
-class MixedTests:
-    @test.only
-    def focused_test(self):
-        expect(1).to_be(1)
-
-    @test
-    def normal_test(self):
-        raise Exception("This should not run")
-""")
-            result = run_cli(temp_dir)
-            expect(result.returncode).to_be(0)
-            expect(result.stdout).to_contain("focused_test")
-
     # Skip mode tests
     @test
     def skipped_tests_are_not_executed(self):

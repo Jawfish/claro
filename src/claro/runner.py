@@ -255,20 +255,10 @@ async def run_suite(
     suite: Suite,
     shared_context: dict[str, Any],
     global_timeout: float | None = None,
-    only_mode: bool = False,
 ) -> list[TestResult]:
     """Run all tests in a suite."""
     results: list[TestResult] = []
-
-    # Determine which tests to run
     tests_to_run = suite.tests
-
-    if only_mode:
-        only_tests = [t for t in suite.tests if t.only]
-        if only_tests:
-            tests_to_run = only_tests
-        else:
-            tests_to_run = []
 
     # Run before_all
     if suite.before_all:
@@ -319,11 +309,6 @@ async def run_suite(
     return results
 
 
-def _has_only_tests(s: Suite) -> bool:
-    """Check if a suite has any .only tests."""
-    return any(t.only for t in s.tests)
-
-
 # ============== Public API ==============
 
 
@@ -338,11 +323,6 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
         print(format_summary([], 0))
         return True
 
-    only_mode = any(_has_only_tests(s) for s in suites)
-
-    if only_mode:
-        print(f"{c.YELLOW}Running only focused tests (.only){c.RESET}\n")
-
     async def run_all() -> list[TestResult]:
         """Run all suites and print results as they complete."""
         all_results: list[TestResult] = []
@@ -352,7 +332,7 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
             print(f"{c.BOLD}{suite.name}{c.RESET}")
 
             # Run suite tests
-            results = await run_suite(suite, {}, timeout, only_mode)
+            results = await run_suite(suite, {}, timeout)
 
             # Print results immediately
             for result in results:

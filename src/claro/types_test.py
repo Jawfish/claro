@@ -69,7 +69,6 @@ class TestDataclassTests:
     def test_has_false_defaults_for_modifiers(self) -> None:
         t = Test(name="example", fn=lambda: None)
         expect(t.skip).to_be(False)
-        expect(t.only).to_be(False)
 
     @test
     def test_has_none_defaults_for_optional_fields(self) -> None:
@@ -85,14 +84,12 @@ class TestDataclassTests:
             name="example",
             fn=lambda: None,
             skip=True,
-            only=True,
             skip_reason="not ready",
             timeout=5.0,
             params=(1, 2, 3),
             param_id="case_1",
         )
         expect(t.skip).to_be(True)
-        expect(t.only).to_be(True)
         expect(t.skip_reason).to_be("not ready")
         expect(t.timeout).to_be(5.0)
         expect(t.params).to_be((1, 2, 3))
