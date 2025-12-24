@@ -26,6 +26,11 @@ Claro is a well-designed async-first test framework with clean architecture and 
 
 12. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
 
+### Potential Over-Engineering (Undecided)
+
+13. **`would_fail` / soft assertions** - Returns bool instead of raising. Only tested by tests that test the feature itself. Unclear use case for legitimate test patterns.
+14. **Custom matcher system** (`@matcher` + `to_satisfy()`) - ~80 lines of extensibility with no evidence of use. YAGNI - could add later if requested.
+
 ---
 
 ## 1. Architecture
