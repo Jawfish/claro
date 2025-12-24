@@ -196,20 +196,6 @@ class ExceptionTests:
 
 
 @suite
-class SoftModeTests:
-    @test
-    def would_fail_does_not_raise_for_failing_assertion(self):
-        # would_fail negates and uses soft mode, so it doesn't raise
-        # even when the underlying assertion would fail
-        expect(5).would_fail.to_be(5)  # This would normally fail but doesn't raise
-
-    @test
-    def would_fail_does_not_raise_for_passing_assertion(self):
-        # Even when the assertion passes, soft mode just doesn't raise
-        expect(5).would_fail.to_be(10)  # 5 != 10, negated = True, no raise
-
-
-@suite
 class AliasTests:
     @test
     def to_not_is_alias_for_not_(self):

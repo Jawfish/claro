@@ -27,17 +27,11 @@ class Expectation:
         await expect(func).to_raise(ValueError)
     """
 
-    __slots__ = ("value", "_negated", "_soft")
+    __slots__ = ("value", "_negated")
 
-    def __init__(self, value: Any, *, negated: bool = False, soft: bool = False):
+    def __init__(self, value: Any, *, negated: bool = False):
         self.value = value
         self._negated = negated
-        self._soft = soft
-
-    @property
-    def would_fail(self) -> "Expectation":
-        """Return soft expectation that returns bool instead of raising."""
-        return Expectation(self.value, negated=not self._negated, soft=True)
 
     @property
     def not_(self) -> "Expectation":
@@ -57,14 +51,11 @@ class Expectation:
         actual: Any = MISSING,
         *,
         show_diff: bool = True,
-    ) -> bool:
-        """Check a condition. Raises ExpectationError or returns bool in soft mode."""
+    ) -> None:
+        """Check a condition. Raises ExpectationError if condition is false."""
         if self._negated:
             condition = not condition
             message = f"NOT {message}"
-
-        if self._soft:
-            return condition
 
         if not condition:
             raise ExpectationError(
@@ -73,7 +64,6 @@ class Expectation:
                 actual=actual,
                 show_diff=show_diff,
             )
-        return True
 
     # ===== Equality =====
 

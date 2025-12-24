@@ -21,18 +21,13 @@ Claro is a well-designed async-first test framework with clean architecture and 
 9. ~~**Chained modifiers over-engineered**~~ - Simplified to terminal decorators
 10. ~~**`_run_silent` threading workaround**~~ - Removed, tests use subprocess
 11. ~~**Sequential mode**~~ - Removed, always run tests in parallel
+12. ~~**`would_fail` / soft assertions**~~ - Removed, unclear use case
 
 ### Remaining Issues
 
-12. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
+13. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
 
 ### Potential Over-Engineering (Undecided)
-
-13. **`would_fail` / soft assertions** (assertions.py:38-40, ~10 lines)
-    - `expect(x).would_fail.to_be(y)` returns `bool` instead of raising
-    - Only tested by 2 tests that test the feature itself, no real usage
-    - Unclear use case: tests should assert or not assert, not conditionally check
-    - Could be removed with no impact on actual test patterns
 
 14. **Custom matcher system** (`@matcher` + `to_satisfy()`) (decorators.py:308-346, assertions.py:373-402, ~80 lines)
     - Allows creating custom matchers: `@matcher def is_even(value): return value % 2 == 0`
@@ -190,7 +185,7 @@ Only 0 (success) and 1 (failure). Should distinguish:
 
 ### Current State: Good
 
-All 248 tests pass. Framework successfully tests itself.
+All 246 tests pass. Framework successfully tests itself.
 
 | Module | Test Status | Key Gaps |
 |--------|-------------|----------|
