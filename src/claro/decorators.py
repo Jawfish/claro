@@ -289,5 +289,3 @@ def suite(
     if cls is not None:
         return decorator(cls)
     return decorator
-
-
