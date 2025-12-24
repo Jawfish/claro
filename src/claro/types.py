@@ -24,7 +24,6 @@ class TestStatus(Enum):
     PASSED = auto()
     FAILED = auto()
     SKIPPED = auto()
-    TODO = auto()
 
 
 @dataclass(slots=True)
@@ -35,7 +34,6 @@ class Test:
     fn: Callable[..., Any | Awaitable[Any]]
     skip: bool = False
     only: bool = False
-    todo: bool = False
     skip_reason: str | None = None
     timeout: float | None = None
     params: tuple[Any, ...] | dict[str, Any] | None = None

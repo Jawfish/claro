@@ -40,7 +40,6 @@ class TestStatusEnumTests:
         expect(TestStatus.PASSED).to_be_instance_of(TestStatus)
         expect(TestStatus.FAILED).to_be_instance_of(TestStatus)
         expect(TestStatus.SKIPPED).to_be_instance_of(TestStatus)
-        expect(TestStatus.TODO).to_be_instance_of(TestStatus)
 
     @test
     def status_values_are_distinct(self) -> None:
@@ -48,10 +47,9 @@ class TestStatusEnumTests:
             TestStatus.PASSED,
             TestStatus.FAILED,
             TestStatus.SKIPPED,
-            TestStatus.TODO,
         ]
         unique_values = {s.value for s in statuses}
-        expect(len(unique_values)).to_be(4)
+        expect(len(unique_values)).to_be(3)
 
 
 @suite
@@ -72,7 +70,6 @@ class TestDataclassTests:
         t = Test(name="example", fn=lambda: None)
         expect(t.skip).to_be(False)
         expect(t.only).to_be(False)
-        expect(t.todo).to_be(False)
 
     @test
     def test_has_none_defaults_for_optional_fields(self) -> None:
@@ -89,7 +86,6 @@ class TestDataclassTests:
             fn=lambda: None,
             skip=True,
             only=True,
-            todo=True,
             skip_reason="not ready",
             timeout=5.0,
             params=(1, 2, 3),
@@ -97,7 +93,6 @@ class TestDataclassTests:
         )
         expect(t.skip).to_be(True)
         expect(t.only).to_be(True)
-        expect(t.todo).to_be(True)
         expect(t.skip_reason).to_be("not ready")
         expect(t.timeout).to_be(5.0)
         expect(t.params).to_be((1, 2, 3))

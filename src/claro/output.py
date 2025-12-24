@@ -155,10 +155,6 @@ def format_result(result: TestResult, indent: str = "") -> list[str]:
         icon = f"{c.YELLOW}○{c.RESET}"
         name_color = c.DIM
         duration_str = f"{c.DIM}[skipped]{c.RESET}"
-    elif result.status == TestStatus.TODO:
-        icon = f"{c.MAGENTA}◌{c.RESET}"
-        name_color = c.DIM
-        duration_str = f"{c.DIM}[todo]{c.RESET}"
     else:
         icon = "?"
         name_color = ""
@@ -193,7 +189,6 @@ def format_summary(results: list[TestResult], total_time_ms: float) -> str:
         (TestStatus.PASSED, c.GREEN, "passed"),
         (TestStatus.FAILED, c.RED, "failed"),
         (TestStatus.SKIPPED, c.YELLOW, "skipped"),
-        (TestStatus.TODO, c.MAGENTA, "todo"),
     ]
 
     parts = [

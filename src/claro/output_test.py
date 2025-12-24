@@ -224,22 +224,6 @@ class FormatResultTests:
         expect(output).to_contain("[skipped]")
         Colors.reset_detection()
 
-    @test
-    def todo_test_shows_todo_label(self):
-        Colors.reset_detection()
-        Colors.disable()
-        result = TestResult(
-            suite_name="TestSuite",
-            test_name="todo test",
-            status=TestStatus.TODO,
-            duration_ms=0,
-        )
-        lines = format_result(result)
-        output = "\n".join(lines)
-        expect(output).to_contain("todo test")
-        expect(output).to_contain("[todo]")
-        Colors.reset_detection()
-
 
 @suite
 class FormatSummaryTests:
@@ -266,14 +250,12 @@ class FormatSummaryTests:
             TestResult("Suite", "passed2", TestStatus.PASSED, 1.0),
             TestResult("Suite", "failed1", TestStatus.FAILED, 1.0),
             TestResult("Suite", "skipped1", TestStatus.SKIPPED, 0),
-            TestResult("Suite", "todo1", TestStatus.TODO, 0),
-            TestResult("Suite", "todo2", TestStatus.TODO, 0),
+            TestResult("Suite", "skipped2", TestStatus.SKIPPED, 0),
         ]
         summary = format_summary(results, 500.0)
         expect(summary).to_contain("2 passed")
         expect(summary).to_contain("1 failed")
-        expect(summary).to_contain("1 skipped")
-        expect(summary).to_contain("2 todo")
+        expect(summary).to_contain("2 skipped")
         Colors.reset_detection()
 
     @test

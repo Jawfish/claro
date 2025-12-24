@@ -104,17 +104,6 @@ class TestModifierTests:
         suites = get_suites()
         expect(suites[0].tests[0].only).to_be(True)
 
-    @test
-    def todo_marks_test_as_placeholder(self):
-        @suite
-        class TodoTests:
-            @test.todo
-            def todo_test(self):
-                pass
-
-        suites = get_suites()
-        expect(suites[0].tests[0].todo).to_be(True)
-
 
 @suite
 class SkipIfTests:

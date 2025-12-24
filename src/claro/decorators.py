@@ -55,10 +55,37 @@ def _short_repr(value: Any, max_len: int = 20) -> str:
 
 # ============== Test Decorator ==============
 
+# Type alias for test decorator
+TestDecorator = Callable[[Callable[..., Any]], Callable[..., Any]]
+
+
+def _make_decorator(
+    *,
+    skip: bool = False,
+    only: bool = False,
+    skip_reason: str | None = None,
+    timeout_seconds: float | None = None,
+    params: list[Any] | None = None,
+) -> TestDecorator:
+    """Create a test decorator with the given settings."""
+
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+        fn._is_test = True  # type: ignore[attr-defined]
+        fn._skip = skip  # type: ignore[attr-defined]
+        fn._only = only  # type: ignore[attr-defined]
+        fn._skip_reason = skip_reason  # type: ignore[attr-defined]
+        fn._timeout = timeout_seconds  # type: ignore[attr-defined]
+        fn._params = params  # type: ignore[attr-defined]
+        return fn
+
+    return decorator
+
 
 class _TestMarker:
     """
     Decorator for marking test methods.
+
+    Each modifier returns a terminal decorator that cannot be chained.
 
     Usage:
         @test
@@ -70,9 +97,6 @@ class _TestMarker:
         @test.only
         def focused_test(self): ...
 
-        @test.todo
-        def future_test(self): ...
-
         @test.skip_if(condition, "reason")
         def conditional_test(self): ...
 
@@ -82,80 +106,40 @@ class _TestMarker:
         @test.each([(1, 2, 3), (2, 3, 5)])
         def parametrized(self, a, b, expected): ...
 
-    Modifiers can be chained:
-        @test.timeout(5.0).skip
-        def slow_skipped_test(self): ...
+        @test.each([(1, 2, 3)], timeout=5.0)
+        def parametrized_with_timeout(self, a, b, expected): ...
     """
 
-    __slots__ = ("_skip", "_only", "_todo", "_skip_reason", "_timeout", "_params")
-
-    def __init__(
-        self,
-        *,
-        skip: bool = False,
-        only: bool = False,
-        todo: bool = False,
-        skip_reason: str | None = None,
-        timeout_seconds: float | None = None,
-        params: list[Any] | None = None,
-    ):
-        self._skip = skip
-        self._only = only
-        self._todo = todo
-        self._skip_reason = skip_reason
-        self._timeout = timeout_seconds
-        self._params = params
-
-    def _derive(self, **overrides: Any) -> "_TestMarker":
-        """Create a new marker preserving current state with overrides."""
-        return _TestMarker(
-            skip=overrides.get("skip", self._skip),
-            only=overrides.get("only", self._only),
-            todo=overrides.get("todo", self._todo),
-            skip_reason=overrides.get("skip_reason", self._skip_reason),
-            timeout_seconds=overrides.get("timeout_seconds", self._timeout),
-            params=overrides.get("params", self._params),
-        )
-
     def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Apply the test marker to a function."""
-        fn._is_test = True  # type: ignore[attr-defined]
-        fn._skip = self._skip  # type: ignore[attr-defined]
-        fn._only = self._only  # type: ignore[attr-defined]
-        fn._todo = self._todo  # type: ignore[attr-defined]
-        fn._skip_reason = self._skip_reason  # type: ignore[attr-defined]
-        fn._timeout = self._timeout  # type: ignore[attr-defined]
-        fn._params = self._params  # type: ignore[attr-defined]
-        return fn
+        """Basic @test decorator."""
+        return _make_decorator()(fn)
 
     @property
-    def skip(self) -> "_TestMarker":
+    def skip(self) -> TestDecorator:
         """Mark test as skipped."""
-        return self._derive(skip=True)
+        return _make_decorator(skip=True)
 
     @property
-    def only(self) -> "_TestMarker":
+    def only(self) -> TestDecorator:
         """Mark test to run exclusively (focus mode)."""
-        return self._derive(only=True)
+        return _make_decorator(only=True)
 
-    @property
-    def todo(self) -> "_TestMarker":
-        """Mark test as a placeholder (not implemented)."""
-        return self._derive(todo=True)
-
-    def skip_if(self, condition: bool, reason: str = "") -> "_TestMarker":
+    def skip_if(self, condition: bool, reason: str = "") -> TestDecorator:
         """Conditionally skip test if condition is true."""
         if condition:
-            return self._derive(skip=True, skip_reason=reason)
-        return self
+            return _make_decorator(skip=True, skip_reason=reason)
+        return _make_decorator()
 
-    def timeout(self, seconds: float) -> "_TestMarker":
+    def timeout(self, seconds: float) -> TestDecorator:
         """Set a timeout for this specific test."""
-        return self._derive(timeout_seconds=seconds)
+        return _make_decorator(timeout_seconds=seconds)
 
     def each(
-        self, params: Sequence[tuple[Any, ...] | dict[str, Any] | Any]
-    ) -> "_TestMarker":
+        self,
+        params: Sequence[tuple[Any, ...] | dict[str, Any] | Any],
+        *,
+        timeout: float | None = None,
+    ) -> TestDecorator:
         """
         Create parametrized tests.
 
@@ -164,6 +148,7 @@ class _TestMarker:
                 - tuple: positional args
                 - dict: keyword args (can include 'id' for custom name)
                 - single value: passed as single arg
+            timeout: Optional timeout for each parametrized test (seconds).
 
         Example:
             @test.each([
@@ -174,7 +159,7 @@ class _TestMarker:
             def adds(self, a, b, expected):
                 expect(a + b).to_be(expected)
         """
-        return self._derive(params=list(params))
+        return _make_decorator(params=list(params), timeout_seconds=timeout)
 
 
 # Singleton instance
@@ -223,7 +208,6 @@ def _create_test(
         fn=fn,
         skip=getattr(fn, "_skip", False),
         only=getattr(fn, "_only", False),
-        todo=getattr(fn, "_todo", False),
         skip_reason=getattr(fn, "_skip_reason", None),
         timeout=getattr(fn, "_timeout", None),
         params=params,
