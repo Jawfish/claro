@@ -2,6 +2,7 @@
 
 import os
 import sys
+from collections import Counter
 from typing import Any
 
 from .types import MISSING, TestResult, TestStatus
@@ -184,21 +185,21 @@ def format_result(result: TestResult, indent: str = "") -> list[str]:
 
 def format_summary(results: list[TestResult], total_time_ms: float) -> str:
     """Format final test summary."""
-    passed = sum(1 for r in results if r.status == TestStatus.PASSED)
-    failed = sum(1 for r in results if r.status == TestStatus.FAILED)
-    skipped = sum(1 for r in results if r.status == TestStatus.SKIPPED)
-    todo = sum(1 for r in results if r.status == TestStatus.TODO)
+    counts = Counter(r.status for r in results)
 
-    parts = []
+    # Status display order and formatting
+    status_format = [
+        (TestStatus.PASSED, c.GREEN, "passed"),
+        (TestStatus.FAILED, c.RED, "failed"),
+        (TestStatus.SKIPPED, c.YELLOW, "skipped"),
+        (TestStatus.TODO, c.MAGENTA, "todo"),
+    ]
 
-    if passed > 0:
-        parts.append(f"{c.GREEN}{passed} passed{c.RESET}")
-    if failed > 0:
-        parts.append(f"{c.RED}{failed} failed{c.RESET}")
-    if skipped > 0:
-        parts.append(f"{c.YELLOW}{skipped} skipped{c.RESET}")
-    if todo > 0:
-        parts.append(f"{c.MAGENTA}{todo} todo{c.RESET}")
+    parts = [
+        f"{color}{counts[status]} {label}{c.RESET}"
+        for status, color, label in status_format
+        if counts[status] > 0
+    ]
 
     summary = ", ".join(parts) if parts else "No tests"
     duration = format_duration(total_time_ms)

@@ -6,7 +6,7 @@ from typing import Any
 
 from claro import after_each, before_each, clear_suites, expect, suite, test
 from claro.cli import create_parser, main
-from claro.decorators import _registry_test_lock, _suites, _suites_lock
+from claro.decorators import _suites, _suites_lock
 from claro.output import Colors
 
 
@@ -105,14 +105,12 @@ class ParserColorArgumentTests:
 class MainColorConfigurationTests:
     @before_each
     def setup(self):
-        _registry_test_lock.acquire()
         clear_suites()
         Colors.reset_detection()
 
     @after_each
     def teardown(self):
         clear_suites()
-        _registry_test_lock.release()
 
     @test
     def no_color_flag_sets_colors_disabled(self):
@@ -153,7 +151,6 @@ class MainFunctionTests:
 
     @before_each
     def setup(self):
-        _registry_test_lock.acquire()
         with _suites_lock:
             self._shared["original_suites"] = _suites.copy()
         Colors.disable()
@@ -164,7 +161,6 @@ class MainFunctionTests:
             _suites.clear()
             _suites.extend(self._shared["original_suites"])
         Colors.reset_detection()
-        _registry_test_lock.release()
 
     # Path validation tests
     @test

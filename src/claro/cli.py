@@ -61,9 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         Exit code (0 for success, 1 for failure).
     """
     # Check if we're in a nested run context (e.g., a test calling main())
-    # Access module variables directly to get current values (not import-time values)
-    with runner._running_lock:
-        nested = runner._running
+    nested = runner._is_inside_event_loop()
 
     if nested:
         # Suppress all output in nested runs
