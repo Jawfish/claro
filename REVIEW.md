@@ -33,8 +33,8 @@ Claro is a well-designed async-first test framework with clean architecture and 
     - Allows creating custom matchers: `@matcher def is_even(value): return value % 2 == 0`
     - Used via `expect(4).to_satisfy(is_even)`
     - Requires learning a protocol (return bool or tuple of bool+message)
-    - No evidence of use outside tests that test the feature
-    - YAGNI - extensibility that adds API surface without demonstrated need
+    - Users can achieve the same with plain functions: `expect(is_even(4)).to_be(True)`
+    - YAGNI - adds API surface for extensibility that hasn't been requested
 
 ---
 
