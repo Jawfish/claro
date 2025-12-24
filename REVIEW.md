@@ -28,8 +28,18 @@ Claro is a well-designed async-first test framework with clean architecture and 
 
 ### Potential Over-Engineering (Undecided)
 
-13. **`would_fail` / soft assertions** - Returns bool instead of raising. Only tested by tests that test the feature itself. Unclear use case for legitimate test patterns.
-14. **Custom matcher system** (`@matcher` + `to_satisfy()`) - ~80 lines of extensibility with no evidence of use. YAGNI - could add later if requested.
+13. **`would_fail` / soft assertions** (assertions.py:38-40, ~10 lines)
+    - `expect(x).would_fail.to_be(y)` returns `bool` instead of raising
+    - Only tested by 2 tests that test the feature itself, no real usage
+    - Unclear use case: tests should assert or not assert, not conditionally check
+    - Could be removed with no impact on actual test patterns
+
+14. **Custom matcher system** (`@matcher` + `to_satisfy()`) (decorators.py:308-346, assertions.py:373-402, ~80 lines)
+    - Allows creating custom matchers: `@matcher def is_even(value): return value % 2 == 0`
+    - Used via `expect(4).to_satisfy(is_even)`
+    - Requires learning a protocol (return bool or tuple of bool+message)
+    - No evidence of use outside tests that test the feature
+    - YAGNI - extensibility that adds API surface without demonstrated need
 
 ---
 
