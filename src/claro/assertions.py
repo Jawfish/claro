@@ -24,7 +24,7 @@ class Expectation:
         expect(value).to_be(expected)
         expect(value).not_.to_be(unexpected)
         expect(items).to_contain(item)
-        expect(func).to_raise(ValueError)
+        await expect(func).to_raise(ValueError)
     """
 
     __slots__ = ("value", "_negated", "_soft")
@@ -156,7 +156,30 @@ class Expectation:
 
     def to_be_close_to(self, expected: float, *, delta: float = 1e-9) -> None:
         """Assert float value is within delta of expected."""
+        import math
+
         actual = float(self.value)
+
+        # Handle NaN - NaN is never close to anything, including itself
+        if math.isnan(actual) or math.isnan(expected):
+            self._check(
+                False,
+                f"Cannot compare NaN values: actual={actual!r}, expected={expected!r}",
+                show_diff=False,
+            )
+            return
+
+        # Handle Infinity - infinities are only equal to themselves
+        if math.isinf(actual) or math.isinf(expected):
+            self._check(
+                actual == expected,
+                f"Expected {actual!r} to equal {expected!r} (infinity comparison)",
+                expected=expected,
+                actual=actual,
+                show_diff=False,
+            )
+            return
+
         diff = abs(actual - expected)
         self._check(
             diff <= delta,
@@ -200,6 +223,10 @@ class Expectation:
 
     def to_be_between(self, low: Any, high: Any, *, inclusive: bool = True) -> None:
         """Assert value is between low and high."""
+        if low > high:
+            msg = f"Invalid range: low ({low!r}) must be <= high ({high!r})"
+            raise ValueError(msg)
+
         if inclusive:
             in_range = low <= self.value <= high
             desc = "between"
@@ -376,8 +403,27 @@ class Expectation:
 
     # ===== Exceptions =====
 
-    async def to_raise_async(self, exception_type: type[Exception] = Exception) -> None:
-        """Assert that calling the value raises an exception (async version)."""
+    def _check_exception(
+        self, raised: bool, raised_type: type | None, exception_type: type[Exception]
+    ) -> None:
+        """Common exception checking logic."""
+        if raised_type is not None and not raised:
+            self._check(
+                False,
+                f"Expected {exception_type.__name__} to be raised, "
+                f"got {raised_type.__name__}",
+                show_diff=False,
+            )
+        else:
+            self._check(
+                raised,
+                f"Expected {exception_type.__name__} to be raised, "
+                "but nothing was raised",
+                show_diff=False,
+            )
+
+    async def to_raise(self, exception_type: type[Exception] = Exception) -> None:
+        """Assert that calling the value raises an exception."""
         raised = False
         raised_type = None
 
@@ -390,23 +436,10 @@ class Expectation:
         except Exception as e:
             raised_type = type(e)
 
-        if raised_type is not None and not raised:
-            self._check(
-                False,
-                f"Expected {exception_type.__name__} to be raised, "
-                f"got {raised_type.__name__}",
-                show_diff=False,
-            )
-        else:
-            self._check(
-                raised,
-                f"Expected {exception_type.__name__} to be raised, "
-                "but nothing was raised",
-                show_diff=False,
-            )
+        self._check_exception(raised, raised_type, exception_type)
 
-    def to_raise(self, exception_type: type[Exception] = Exception) -> None:
-        """Assert that calling the value raises an exception (sync version)."""
+    def to_raise_sync(self, exception_type: type[Exception] = Exception) -> None:
+        """Assert that calling the value raises an exception (sync-only version)."""
         raised = False
         raised_type = None
 
@@ -417,20 +450,7 @@ class Expectation:
         except Exception as e:
             raised_type = type(e)
 
-        if raised_type is not None and not raised:
-            self._check(
-                False,
-                f"Expected {exception_type.__name__} to be raised, "
-                f"got {raised_type.__name__}",
-                show_diff=False,
-            )
-        else:
-            self._check(
-                raised,
-                f"Expected {exception_type.__name__} to be raised, "
-                "but nothing was raised",
-                show_diff=False,
-            )
+        self._check_exception(raised, raised_type, exception_type)
 
 
 def expect(value: T) -> Expectation:
