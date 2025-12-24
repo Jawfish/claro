@@ -12,7 +12,6 @@ from claro import (
     suite,
     test,
 )
-from claro.types import RunMode
 
 
 @suite
@@ -30,24 +29,6 @@ class SuiteRegistrationTests:
         suites = get_suites()
         expect(suites).to_have_length(1)
         expect(suites[0].name).to_be("MyTestSuite")
-
-    @test
-    def suite_uses_parallel_mode_by_default(self):
-        @suite
-        class DefaultModeSuite:
-            pass
-
-        suites = get_suites()
-        expect(suites[0].mode).to_be(RunMode.PARALLEL)
-
-    @test
-    def sequential_suite_uses_sequential_mode(self):
-        @suite(sequential=True)
-        class SequentialSuite:
-            pass
-
-        suites = get_suites()
-        expect(suites[0].mode).to_be(RunMode.SEQUENTIAL)
 
     @test
     def suite_timeout_is_set_from_argument(self):

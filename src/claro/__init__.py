@@ -15,7 +15,6 @@ from .decorators import (
 from .types import (
     MISSING,
     ExpectationError,
-    RunMode,
     Suite,
     Test,
     TestResult,
@@ -45,7 +44,6 @@ __all__ = [
     "Test",
     "TestResult",
     "TestStatus",
-    "RunMode",
     # Exceptions
     "ExpectationError",
     "TestTimeoutError",

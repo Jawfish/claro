@@ -101,7 +101,7 @@ class ParserColorArgumentTests:
         expect(args.color).to_be_falsy()
 
 
-@suite(sequential=True)
+@suite
 class MainColorConfigurationTests:
     @before_each
     def setup(self):
@@ -143,9 +143,9 @@ class MainColorConfigurationTests:
             Colors._enabled = original
 
 
-# All tests that call main() must be in a single sequential suite
-# because main() modifies the global _suites registry
-@suite(sequential=True)
+# Tests that call main() modify the global _suites registry
+# so they use before_each/after_each to save/restore state
+@suite
 class MainFunctionTests:
     _shared: dict[str, Any]
 

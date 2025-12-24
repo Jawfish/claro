@@ -12,7 +12,6 @@ from .output import c, format_duration, format_summary
 from .types import (
     MISSING,
     ExpectationError,
-    RunMode,
     Suite,
     Test,
     TestResult,
@@ -284,7 +283,7 @@ async def run_suite(
         await maybe_await(suite.before_all, shared_context)
 
     try:
-        if suite.mode == RunMode.PARALLEL and len(tests_to_run) > 1:
+        if len(tests_to_run) > 1:
             # Run tests in parallel using TaskGroup for structured concurrency
             tasks: dict[asyncio.Task[TestResult], Test] = {}
             try:
@@ -315,7 +314,7 @@ async def run_suite(
                                 )
                             )
         else:
-            # Run tests sequentially
+            # Single test - run directly
             for t in tests_to_run:
                 result = await run_single_test(suite, t, shared_context, global_timeout)
                 results.append(result)

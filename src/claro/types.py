@@ -27,13 +27,6 @@ class TestStatus(Enum):
     TODO = auto()
 
 
-class RunMode(Enum):
-    """Execution mode for a test suite."""
-
-    PARALLEL = auto()
-    SEQUENTIAL = auto()
-
-
 @dataclass(slots=True)
 class Test:
     """Represents a single test case."""
@@ -60,7 +53,6 @@ class Suite:
     after_each: Callable[..., Any] | None = None
     before_all: Callable[..., Any] | None = None
     after_all: Callable[..., Any] | None = None
-    mode: RunMode = RunMode.PARALLEL
     timeout: float | None = None
 
 

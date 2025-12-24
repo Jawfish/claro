@@ -249,7 +249,7 @@ class RunSingleTestTests:
         expect(after_called).to_be([True])
 
 
-@suite(sequential=True)
+@suite
 class RunIntegrationTests:
     @before_each
     def setup(self):

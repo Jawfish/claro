@@ -21,7 +21,7 @@ class DefaultPatternsTests:
         expect(DEFAULT_PATTERNS).to_contain("*_test.py")
 
 
-@suite(sequential=True)
+@suite
 class DiscoverTestFilesTests:
     @before_each
     def reset_registry(self):
@@ -175,7 +175,7 @@ assert False
             check_assert_messages(test_file)
 
 
-@suite(sequential=True)
+@suite
 class ImportTestFileTests:
     @before_each
     def reset_registry(self):
@@ -262,7 +262,7 @@ class BadAssertSuiteUnique456:
                 pass  # Expected
 
 
-@suite(sequential=True)
+@suite
 class CollectTestsTests:
     @before_each
     def reset_registry(self):

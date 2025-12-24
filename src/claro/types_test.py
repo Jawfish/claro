@@ -4,7 +4,6 @@ from claro import expect, suite, test
 from claro.types import (
     MISSING,
     ExpectationError,
-    RunMode,
     Suite,
     Test,
     TestResult,
@@ -53,20 +52,6 @@ class TestStatusEnumTests:
         ]
         unique_values = {s.value for s in statuses}
         expect(len(unique_values)).to_be(4)
-
-
-@suite
-class RunModeEnumTests:
-    """Tests for RunMode enum."""
-
-    @test
-    def all_mode_values_exist(self) -> None:
-        expect(RunMode.PARALLEL).to_be_instance_of(RunMode)
-        expect(RunMode.SEQUENTIAL).to_be_instance_of(RunMode)
-
-    @test
-    def mode_values_are_distinct(self) -> None:
-        expect(RunMode.PARALLEL.value).not_.to_be(RunMode.SEQUENTIAL.value)
 
 
 @suite
@@ -150,14 +135,6 @@ class SuiteDataclassTests:
         expect(s.after_each).to_be(None)
         expect(s.before_all).to_be(None)
         expect(s.after_all).to_be(None)
-
-    @test
-    def suite_defaults_to_parallel_mode(self) -> None:
-        class DummySuite:
-            pass
-
-        s = Suite(name="MySuite", cls=DummySuite)
-        expect(s.mode).to_be(RunMode.PARALLEL)
 
     @test
     def suite_has_none_default_for_timeout(self) -> None:

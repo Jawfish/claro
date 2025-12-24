@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "just fix >&2 && PYTHONPATH=. uv run claro ./src/claro >&2 || exit 2"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable, Sequence
 from typing import Any, overload
 
-from .types import RunMode, Suite, Test
+from .types import Suite, Test
 
 # Global registry of suites (thread-safe for free-threaded Python)
 _suites_lock = threading.Lock()
@@ -239,7 +239,6 @@ def suite(cls: type) -> type: ...
 def suite(
     cls: None = None,
     *,
-    sequential: bool = False,
     timeout: float | None = None,
 ) -> Callable[[type], type]: ...
 
@@ -247,14 +246,12 @@ def suite(
 def suite(
     cls: type | None = None,
     *,
-    sequential: bool = False,
     timeout: float | None = None,
 ) -> type | Callable[[type], type]:
     """
     Class decorator that registers a test suite.
 
     Args:
-        sequential: If True, run tests sequentially instead of in parallel.
         timeout: Default timeout for tests in this suite (in seconds).
 
     Usage:
@@ -263,7 +260,7 @@ def suite(
             @test
             def example(self): ...
 
-        @suite(sequential=True, timeout=5.0)
+        @suite(timeout=5.0)
         class SlowTests:
             ...
     """
@@ -272,7 +269,6 @@ def suite(
         s = Suite(
             name=cls.__name__,
             cls=cls,
-            mode=RunMode.SEQUENTIAL if sequential else RunMode.PARALLEL,
             timeout=timeout,
         )
 
