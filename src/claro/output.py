@@ -1,6 +1,7 @@
 """Terminal output formatting and colors."""
 
 import os
+import reprlib
 import sys
 from collections import Counter
 from typing import Any
@@ -101,8 +102,8 @@ def format_duration(ms: float) -> str:
 def format_diff(expected: Any, actual: Any, indent: str = "      ") -> list[str]:
     """Generate diff lines between expected and actual values."""
     lines: list[str] = []
-    exp_str = repr(expected)
-    act_str = repr(actual)
+    exp_str = reprlib.repr(expected)
+    act_str = reprlib.repr(actual)
 
     # For strings, show line-by-line diff
     if (

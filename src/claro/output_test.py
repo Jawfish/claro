@@ -120,6 +120,19 @@ class FormatDiffTests:
         expect(lines[1]).to_start_with("  ")
         Colors.reset_detection()
 
+    @test
+    def circular_reference_is_handled_safely(self):
+        Colors.reset_detection()
+        Colors.disable()
+        circular: list = []
+        circular.append(circular)
+        # Should not raise RecursionError
+        lines = format_diff(circular, [1, 2, 3])
+        expect(len(lines)).to_be(2)
+        # reprlib truncates circular refs with [...]
+        expect(lines[0]).to_contain("[[...]]")
+        Colors.reset_detection()
+
 
 @suite
 class FormatResultTests:
