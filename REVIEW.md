@@ -15,11 +15,16 @@ Claro is a well-designed async-first test framework with clean architecture and 
 3. ~~**`Awaitable` import bug**~~ - Fixed with `from __future__ import annotations`
 4. ~~**`get_suites()` not thread-safe**~~ - Now returns a copy with lock
 5. ~~**Unused `_registry_test_lock`**~~ - Removed dead code
+6. ~~**Nested suite handling untested**~~ - Removed nested suite support entirely
+7. ~~**Circular reference in repr**~~ - Fixed with `reprlib.repr()`
+8. ~~**`@test.todo` redundant**~~ - Removed, use `@test.skip` instead
+9. ~~**Chained modifiers over-engineered**~~ - Simplified to terminal decorators
+10. ~~**`_run_silent` threading workaround**~~ - Removed, tests use subprocess
+11. ~~**Sequential mode**~~ - Removed, always run tests in parallel
 
 ### Remaining Issues
 
-6. **Nested suite handling untested** - Feature exists but no test coverage (decorators.py:289-290)
-7. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
+12. **Multiple lifecycle hooks overwrite silently** - No warning if class has two `@before_each` methods
 
 ---
 
@@ -60,14 +65,10 @@ _suites: list[Suite] = []
 ### Current State: Good
 
 After refactoring:
-- 493 lines (down from 651)
+- ~370 lines (down from 651)
 - No threading/JSONL complexity
 - Simple async model with sequential suite output
-
-### Remaining Issues
-
-#### _run_silent Threading (Lines 330-388)
-Still uses threading for nested run detection. This is necessary because `asyncio.run()` cannot be nested. Could potentially use subprocess in future, but current implementation is pragmatic.
+- Pure asyncio, no nested run detection needed (tests use subprocess)
 
 ---
 
@@ -101,14 +102,13 @@ Invalid regex patterns raise `re.error` uncaught.
 
 ### Current State: Good
 
-Thread safety fixed with lock + copy pattern.
+- Thread safety fixed with lock + copy pattern
+- Simplified test modifiers to terminal decorators (no chaining)
+- Removed `@test.todo` (use `@test.skip` instead)
 
 ### Minor Issues
 
-#### ~~Nested Suites Untested~~ ✓
-Removed nested suite support - low-value feature with no test coverage.
-
-#### Multiple Lifecycle Hooks Overwrite Silently (Lines 287-294)
+#### Multiple Lifecycle Hooks Overwrite Silently
 If class has two `@before_each` methods, only last one runs. No warning.
 
 ---
@@ -145,11 +145,8 @@ If class has two `@before_each` methods, only last one runs. No warning.
 - No wrapping of long error messages
 - No truncation of long test names
 
-#### No Safe Repr for Circular References
-```python
-exp_str = repr(expected)  # RecursionError on circular references!
-```
-Should use `reprlib.repr()` for safe representation.
+#### ~~No Safe Repr for Circular References~~ ✓
+Fixed - now uses `reprlib.repr()` for safe representation.
 
 ---
 
@@ -178,18 +175,18 @@ Only 0 (success) and 1 (failure). Should distinguish:
 
 ### Current State: Good
 
-All 257 tests pass. Framework successfully tests itself.
+All 248 tests pass. Framework successfully tests itself.
 
 | Module | Test Status | Key Gaps |
 |--------|-------------|----------|
-| assertions.py | ✓ Comprehensive | None (NaN/Inf fixed) |
+| assertions.py | ✓ Comprehensive | None |
 | types.py | ✓ Complete | None |
 | decorators.py | ✓ Good | None |
-| runner.py | ✓ Good | None major |
+| runner.py | ✓ Good | None |
 | discovery.py | ✓ Good | Symlink handling |
-| output.py | ✓ Good | Terminal width, circular refs |
-| cli.py | ✓ Good | None major |
-| enhance.py | ✓ Good | None major |
+| output.py | ✓ Good | Terminal width |
+| cli.py | ✓ Good | None |
+| enhance.py | ✓ Good | None |
 
 ---
 
@@ -205,7 +202,7 @@ All 257 tests pass. Framework successfully tests itself.
 
 4. ~~**Add nested suite tests** or remove the feature~~ - Removed nested suite support (low-value, untested)
 5. **Add `--list` and `--match` CLI options**
-6. **Add safe repr** for circular references in output
+6. ~~**Add safe repr** for circular references in output~~ - Fixed with `reprlib.repr()`
 7. **Add exclusion patterns** to discovery
 
 ### P3 - Low (Polish)
@@ -220,12 +217,12 @@ All 257 tests pass. Framework successfully tests itself.
 
 | File | Lines | Status | Primary Issues |
 |------|-------|--------|----------------|
-| types.py | 105 | ✓ Good | None |
-| decorators.py | 372 | ✓ Good | Nested suites untested |
-| runner.py | 493 | ✓ Good | None major |
-| assertions.py | 460 | ✓ Good | Edge cases fixed |
+| types.py | 93 | ✓ Good | None |
+| decorators.py | 362 | ✓ Good | None |
+| runner.py | 372 | ✓ Good | None |
+| assertions.py | 458 | ✓ Good | None |
 | discovery.py | 124 | ✓ Good | Security concerns |
-| output.py | 206 | ✓ Good | No safe repr |
-| cli.py | 126 | ✓ Good | Missing features |
-| enhance.py | 103 | ✓ Good | None major |
-| __init__.py | 55 | ✓ Good | None |
+| output.py | 203 | ✓ Good | None |
+| cli.py | 106 | ✓ Good | Missing features |
+| enhance.py | 103 | ✓ Good | None |
+| __init__.py | 52 | ✓ Good | None |
