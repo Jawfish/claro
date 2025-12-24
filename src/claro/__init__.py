@@ -13,6 +13,7 @@ from .decorators import (
     test,
 )
 from .types import (
+    MISSING,
     ExpectationError,
     RunMode,
     Suite,
@@ -48,4 +49,6 @@ __all__ = [
     # Exceptions
     "ExpectationError",
     "TestTimeoutError",
+    # Sentinels
+    "MISSING",
 ]
