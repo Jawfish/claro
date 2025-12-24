@@ -16,10 +16,8 @@ from claro import (
     suite,
     test,
 )
-from claro.decorators import _registry_test_lock
 from claro.runner import (
     _has_only_tests,
-    collect_all_tests,
     maybe_await,
     run,
     run_single_test,
@@ -109,75 +107,9 @@ class HasOnlyTestsTests:
         expect(_has_only_tests(s)).to_be(False)
 
     @test
-    def nested_suite_with_only_test_is_detected(self):
-        child_test = Test(name="focused", fn=lambda: None, only=True)
-        child = Suite(name="Child", cls=object, tests=[child_test])
-        parent = Suite(name="Parent", cls=object, tests=[], children=[child])
-        expect(_has_only_tests(parent)).to_be(True)
-
-    @test
-    def deeply_nested_only_test_is_detected(self):
-        deep_test = Test(name="deep_only", fn=lambda: None, only=True)
-        grandchild = Suite(name="Grandchild", cls=object, tests=[deep_test])
-        child = Suite(name="Child", cls=object, tests=[], children=[grandchild])
-        parent = Suite(name="Parent", cls=object, tests=[], children=[child])
-        expect(_has_only_tests(parent)).to_be(True)
-
-    @test
     def empty_suite_has_no_only_tests(self):
-        s = Suite(name="Empty", cls=object, tests=[], children=[])
-        expect(_has_only_tests(s)).to_be(False)
-
-
-@suite
-class CollectAllTestsTests:
-    @test
-    def collects_all_tests_from_single_suite(self):
-        t1 = Test(name="test1", fn=lambda: None)
-        t2 = Test(name="test2", fn=lambda: None)
-        s = Suite(name="TestSuite", cls=object, tests=[t1, t2])
-
-        result = list(collect_all_tests([s], only_mode=False))
-        expect(len(result)).to_be(1)
-        expect(result[0][0].name).to_be("TestSuite")
-        expect(len(result[0][1])).to_be(2)
-
-    @test
-    def filters_to_only_tests_when_only_mode_is_enabled(self):
-        normal = Test(name="normal", fn=lambda: None, only=False)
-        focused = Test(name="focused", fn=lambda: None, only=True)
-        s = Suite(name="Mixed", cls=object, tests=[normal, focused])
-
-        result = list(collect_all_tests([s], only_mode=True))
-        expect(len(result)).to_be(1)
-        expect(len(result[0][1])).to_be(1)
-        expect(result[0][1][0].name).to_be("focused")
-
-    @test
-    def excludes_suite_with_no_only_tests_in_only_mode(self):
-        t = Test(name="normal", fn=lambda: None, only=False)
-        s = Suite(name="NoOnly", cls=object, tests=[t])
-
-        result = list(collect_all_tests([s], only_mode=True))
-        expect(len(result)).to_be(0)
-
-    @test
-    def collects_tests_from_nested_suites(self):
-        child_test = Test(name="child_test", fn=lambda: None)
-        child = Suite(name="Child", cls=object, tests=[child_test])
-        parent_test = Test(name="parent_test", fn=lambda: None)
-        parent = Suite(name="Parent", cls=object, tests=[parent_test], children=[child])
-
-        result = list(collect_all_tests([parent], only_mode=False))
-        expect(len(result)).to_be(2)
-        expect(result[0][0].name).to_be("Parent")
-        expect(result[1][0].name).to_be("Child")
-
-    @test
-    def empty_suite_is_excluded(self):
         s = Suite(name="Empty", cls=object, tests=[])
-        result = list(collect_all_tests([s], only_mode=False))
-        expect(len(result)).to_be(0)
+        expect(_has_only_tests(s)).to_be(False)
 
 
 @suite
@@ -321,13 +253,11 @@ class RunSingleTestTests:
 class RunIntegrationTests:
     @before_each
     def setup(self):
-        _registry_test_lock.acquire()
         clear_suites()
 
     @after_each
     def teardown(self):
         clear_suites()
-        _registry_test_lock.release()
 
     @test
     def empty_suites_returns_success(self):

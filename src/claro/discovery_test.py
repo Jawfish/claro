@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 from claro import after_each, before_each, clear_suites, expect, get_suites, suite, test
-from claro.decorators import _registry_test_lock
 from claro.discovery import (
     DEFAULT_PATTERNS,
     AssertMessageError,
@@ -26,13 +25,11 @@ class DefaultPatternsTests:
 class DiscoverTestFilesTests:
     @before_each
     def reset_registry(self):
-        _registry_test_lock.acquire()
         clear_suites()
 
     @after_each
     def cleanup(self):
         clear_suites()
-        _registry_test_lock.release()
 
     @test
     def test_files_with_underscore_test_suffix_are_discovered(self):
@@ -182,13 +179,11 @@ assert False
 class ImportTestFileTests:
     @before_each
     def reset_registry(self):
-        _registry_test_lock.acquire()
         clear_suites()
 
     @after_each
     def cleanup(self):
         clear_suites()
-        _registry_test_lock.release()
 
     @test
     def imported_file_registers_its_suites(self):
@@ -271,13 +266,11 @@ class BadAssertSuiteUnique456:
 class CollectTestsTests:
     @before_each
     def reset_registry(self):
-        _registry_test_lock.acquire()
         clear_suites()
 
     @after_each
     def cleanup(self):
         clear_suites()
-        _registry_test_lock.release()
 
     @test
     def collect_returns_list_of_suites(self):

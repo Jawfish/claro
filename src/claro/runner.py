@@ -1,15 +1,11 @@
-"""Async test execution engine with suite-level thread parallelism."""
+"""Async test execution engine."""
 
 import asyncio
 import inspect
 import io
-import json
-import tempfile
 import threading
 import time
-from collections.abc import Iterator
 from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
-from pathlib import Path
 from typing import Any
 
 from .output import c, format_duration, format_summary
@@ -25,13 +21,14 @@ from .types import (
 )
 
 
-# Pre-computed icon strings
-_ICON_SKIP = f"{c.YELLOW}○{c.RESET}"
-_ICON_TODO = f"{c.MAGENTA}◌{c.RESET}"
-_ICON_PASS = f"{c.GREEN}✓{c.RESET}"
-_ICON_FAIL = f"{c.RED}✗{c.RESET}"
-_STATUS_SKIP = f"{c.DIM}[skipped]{c.RESET}"
-_STATUS_TODO = f"{c.DIM}[todo]{c.RESET}"
+# Status display configuration: (icon, name_color, status_suffix_fn)
+# status_suffix_fn takes duration string and returns the suffix
+_STATUS_CONFIG: dict[TestStatus, tuple[str, str, str]] = {
+    TestStatus.PASSED: ("✓", "", "duration"),
+    TestStatus.FAILED: ("✗", "name_red", "duration"),
+    TestStatus.SKIPPED: ("○", "dim", "[skipped]"),
+    TestStatus.TODO: ("◌", "dim", "[todo]"),
+}
 
 
 async def maybe_await(fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -56,46 +53,57 @@ async def timeout_context(seconds: float | None):
         raise TestTimeoutError(seconds) from None
 
 
-def _append_result(results_file: Path, result: TestResult) -> None:
-    """Append a test result to the JSONL file (thread-safe via atomic append)."""
-    line = json.dumps(
-        {
-            "suite": result.suite_name,
-            "test": result.test_name,
-            "status": result.status.value,
-            "duration_ms": result.duration_ms,
-            "error": result.error,
-            "expected": repr(result.expected)
-            if result.expected is not MISSING
-            else None,
-            "actual": repr(result.actual) if result.actual is not MISSING else None,
-            "show_diff": result.show_diff,
-        }
+def _make_result(
+    suite: Suite,
+    test: Test,
+    status: TestStatus,
+    duration_ms: float,
+    *,
+    error: str | None = None,
+    expected: Any = MISSING,
+    actual: Any = MISSING,
+    show_diff: bool = True,
+) -> TestResult:
+    """Create a TestResult with common fields pre-filled."""
+    return TestResult(
+        suite_name=suite.name,
+        test_name=test.name,
+        status=status,
+        duration_ms=duration_ms,
+        error=error,
+        expected=expected,
+        actual=actual,
+        show_diff=show_diff,
     )
-    with open(results_file, "a") as f:
-        f.write(line + "\n")
 
 
 def _print_result(result: TestResult) -> None:
     """Print a single test result line."""
     duration = format_duration(result.duration_ms)
+    icon_char, name_style, suffix_type = _STATUS_CONFIG[result.status]
 
-    if result.status == TestStatus.PASSED:
-        icon = _ICON_PASS
-        name = result.test_name
-        status = f"{c.DIM}({duration}){c.RESET}"
-    elif result.status == TestStatus.FAILED:
-        icon = _ICON_FAIL
+    # Apply color to icon based on status
+    icon_colors = {
+        TestStatus.PASSED: c.GREEN,
+        TestStatus.FAILED: c.RED,
+        TestStatus.SKIPPED: c.YELLOW,
+        TestStatus.TODO: c.MAGENTA,
+    }
+    icon = f"{icon_colors[result.status]}{icon_char}{c.RESET}"
+
+    # Apply name styling
+    if name_style == "name_red":
         name = f"{c.RED}{result.test_name}{c.RESET}"
+    elif name_style == "dim":
+        name = f"{c.DIM}{result.test_name}{c.RESET}"
+    else:
+        name = result.test_name
+
+    # Build status suffix
+    if suffix_type == "duration":
         status = f"{c.DIM}({duration}){c.RESET}"
-    elif result.status == TestStatus.SKIPPED:
-        icon = _ICON_SKIP
-        name = f"{c.DIM}{result.test_name}{c.RESET}"
-        status = _STATUS_SKIP
-    else:  # TODO
-        icon = _ICON_TODO
-        name = f"{c.DIM}{result.test_name}{c.RESET}"
-        status = _STATUS_TODO
+    else:
+        status = f"{c.DIM}{suffix_type}{c.RESET}"
 
     print(f"  {icon} {name} {status}")
 
@@ -128,37 +136,18 @@ async def run_single_test(
     t: Test,
     shared_context: dict[str, Any],
     global_timeout: float | None = None,
-    results_file: Path | None = None,
 ) -> TestResult:
     """Run a single test and return its result."""
-    # Cache event loop reference
     loop = asyncio.get_running_loop()
     start_time = loop.time()
 
     # Handle skipped tests
     if t.skip:
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.SKIPPED,
-            duration_ms=0,
-            error=t.skip_reason,
-        )
-        if results_file:
-            _append_result(results_file, result)
-        return result
+        return _make_result(suite, t, TestStatus.SKIPPED, 0, error=t.skip_reason)
 
     # Handle todo tests
     if t.todo:
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.TODO,
-            duration_ms=0,
-        )
-        if results_file:
-            _append_result(results_file, result)
-        return result
+        return _make_result(suite, t, TestStatus.TODO, 0)
 
     # Create fresh instance for this test
     instance = suite.cls()
@@ -185,31 +174,21 @@ async def run_single_test(
                 await maybe_await(t.fn, instance)
 
         duration = (loop.time() - start_time) * 1000
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.PASSED,
-            duration_ms=duration,
-        )
+        result = _make_result(suite, t, TestStatus.PASSED, duration)
 
     except TestTimeoutError as e:
         duration = (loop.time() - start_time) * 1000
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.FAILED,
-            duration_ms=duration,
-            error=str(e),
-            show_diff=False,
+        result = _make_result(
+            suite, t, TestStatus.FAILED, duration, error=str(e), show_diff=False
         )
 
     except ExpectationError as e:
         duration = (loop.time() - start_time) * 1000
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.FAILED,
-            duration_ms=duration,
+        result = _make_result(
+            suite,
+            t,
+            TestStatus.FAILED,
+            duration,
             error=str(e),
             expected=e.expected,
             actual=e.actual,
@@ -223,22 +202,21 @@ async def run_single_test(
         msg, expected, actual = enhance_assertion_error(e)
 
         if msg is not None:
-            result = TestResult(
-                suite_name=suite.name,
-                test_name=t.name,
-                status=TestStatus.FAILED,
-                duration_ms=duration,
+            result = _make_result(
+                suite,
+                t,
+                TestStatus.FAILED,
+                duration,
                 error=msg,
                 expected=expected,
                 actual=actual,
-                show_diff=True,
             )
         else:
-            result = TestResult(
-                suite_name=suite.name,
-                test_name=t.name,
-                status=TestStatus.FAILED,
-                duration_ms=duration,
+            result = _make_result(
+                suite,
+                t,
+                TestStatus.FAILED,
+                duration,
                 error=str(e) or "Assertion failed",
                 show_diff=False,
             )
@@ -249,14 +227,8 @@ async def run_single_test(
         duration = (loop.time() - start_time) * 1000
         tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
         error_msg = "".join(tb_lines[-3:]).strip()
-
-        result = TestResult(
-            suite_name=suite.name,
-            test_name=t.name,
-            status=TestStatus.FAILED,
-            duration_ms=duration,
-            error=error_msg,
-            show_diff=False,
+        result = _make_result(
+            suite, t, TestStatus.FAILED, duration, error=error_msg, show_diff=False
         )
 
     finally:
@@ -275,21 +247,16 @@ async def run_single_test(
                         type(after_err), after_err, after_err.__traceback__
                     )
                     error_msg = f"after_each failed: {''.join(tb_lines[-3:]).strip()}"
-                    result = TestResult(
-                        suite_name=suite.name,
-                        test_name=t.name,
-                        status=TestStatus.FAILED,
-                        duration_ms=duration,
+                    result = _make_result(
+                        suite,
+                        t,
+                        TestStatus.FAILED,
+                        duration,
                         error=error_msg,
                         show_diff=False,
                     )
 
-    # result should always be set by now
     assert result is not None
-
-    if results_file:
-        _append_result(results_file, result)
-
     return result
 
 
@@ -298,9 +265,8 @@ async def run_suite(
     shared_context: dict[str, Any],
     global_timeout: float | None = None,
     only_mode: bool = False,
-    results_file: Path | None = None,
 ) -> list[TestResult]:
-    """Run all tests in a suite and its children."""
+    """Run all tests in a suite."""
     results: list[TestResult] = []
 
     # Determine which tests to run
@@ -325,9 +291,7 @@ async def run_suite(
                 async with asyncio.TaskGroup() as tg:
                     for t in tests_to_run:
                         task = tg.create_task(
-                            run_single_test(
-                                suite, t, shared_context, global_timeout, results_file
-                            )
+                            run_single_test(suite, t, shared_context, global_timeout)
                         )
                         tasks[task] = t
                 # All tasks completed successfully
@@ -341,10 +305,11 @@ async def run_suite(
                         except Exception as e:
                             # Task raised an unhandled exception
                             results.append(
-                                TestResult(
-                                    suite_name=suite.name,
-                                    test_name=t.name,
-                                    status=TestStatus.FAILED,
+                                _make_result(
+                                    suite,
+                                    t,
+                                    TestStatus.FAILED,
+                                    0,
                                     error=str(e),
                                     show_diff=False,
                                 )
@@ -352,17 +317,8 @@ async def run_suite(
         else:
             # Run tests sequentially
             for t in tests_to_run:
-                result = await run_single_test(
-                    suite, t, shared_context, global_timeout, results_file
-                )
+                result = await run_single_test(suite, t, shared_context, global_timeout)
                 results.append(result)
-
-        # Run child suites
-        for child in suite.children:
-            child_results = await run_suite(
-                child, shared_context, global_timeout, only_mode, results_file
-            )
-            results.extend(child_results)
 
     finally:
         # Run after_all
@@ -372,126 +328,46 @@ async def run_suite(
     return results
 
 
-def collect_all_tests(
-    suites: list[Suite], only_mode: bool
-) -> Iterator[tuple[Suite, list[Test]]]:
-    """Collect all suites and their tests to run (generator to avoid intermediate lists)."""
-    for suite in suites:
-        tests = suite.tests
-        if only_mode:
-            only_tests = [t for t in tests if t.only]
-            if only_tests:
-                tests = only_tests
-            else:
-                tests = []
-
-        if tests:
-            yield (suite, tests)
-
-        # Recurse into children
-        yield from collect_all_tests(suite.children, only_mode)
-
-
-# ============== Thread Workers ==============
-
-
-def _suite_worker(
-    suite: Suite,
-    shared_context: dict[str, Any],
-    timeout: float | None,
-    only_mode: bool,
-    results_file: Path,
-    done_event: threading.Event,
-) -> None:
-    """Run a single suite in its own thread with a dedicated event loop."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    # Note: We don't redirect stdout/stderr here because redirect_* affects
-    # ALL threads globally, not just this one. Nested test output is handled
-    # by _run_silent() which spawns its own isolated thread.
-
-    try:
-        loop.run_until_complete(
-            run_suite(suite, shared_context, timeout, only_mode, results_file)
-        )
-    except Exception as e:
-        # Don't let thread crash silently - report as suite failure
-        import traceback
-
-        tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
-        error_msg = f"Suite crashed: {''.join(tb_lines[-3:]).strip()}"
-        _append_result(
-            results_file,
-            TestResult(
-                suite_name=suite.name,
-                test_name="<suite>",
-                status=TestStatus.FAILED,
-                error=error_msg,
-                show_diff=False,
-            ),
-        )
-    finally:
-        loop.close()
-        done_event.set()
-
-
 def _has_only_tests(s: Suite) -> bool:
-    """Check if a suite or its children have any .only tests."""
-    if any(t.only for t in s.tests):
+    """Check if a suite has any .only tests."""
+    return any(t.only for t in s.tests)
+
+
+def _is_inside_event_loop() -> bool:
+    """Check if we're already inside an asyncio event loop."""
+    try:
+        asyncio.get_running_loop()
         return True
-    return any(_has_only_tests(child) for child in s.children)
+    except RuntimeError:
+        return False
 
 
 # ============== Public API ==============
 
-# Global flag to detect nested runs (when tests call main())
-_running_lock = threading.Lock()
-_running = False
-
 
 def run(suites: list[Suite], timeout: float | None = None) -> bool:
     """
-    Run all test suites with suite-level thread parallelism.
+    Run all test suites.
 
-    Each top-level suite runs in its own thread with a dedicated asyncio event loop.
-    Tests within a suite run concurrently via TaskGroup.
-    A dedicated output thread handles all terminal updates.
+    Suites run sequentially, but tests within each suite run concurrently
+    via asyncio TaskGroup for maximum parallelism.
     """
-    global _running
-
-    # Check if this is a nested run (e.g., a test calling main())
-    with _running_lock:
-        nested = _running
-        if not nested:
-            _running = True
-
-    try:
-        if nested:
-            # Nested run - suppress all output, just return results
-            return _run_silent(suites, timeout)
-        else:
-            return _run_with_output(suites, timeout)
-    finally:
-        if not nested:
-            with _running_lock:
-                _running = False
+    if _is_inside_event_loop():
+        # Nested run (e.g., a test calling main()) - suppress output
+        return _run_silent(suites, timeout)
+    return _run_with_output(suites, timeout)
 
 
 def _run_silent(suites: list[Suite], timeout: float | None = None) -> bool:
     """Run tests without any output (for nested runs).
 
-    Spawns a separate thread because asyncio event loops cannot be nested
-    within the same thread. Each thread gets its own event loop.
+    Uses a separate thread because we may already be inside an event loop.
     """
     if not suites:
         return True
 
     only_mode = any(_has_only_tests(s) for s in suites)
-    nested_suite_ids = {id(child) for s in suites for child in s.children}
-    top_level_suites = [s for s in suites if id(s) not in nested_suite_ids]
 
-    # Use lists to capture results from the worker thread
     results: list[TestResult] = []
     error_holder: list[Exception] = []
 
@@ -500,15 +376,14 @@ def _run_silent(suites: list[Suite], timeout: float | None = None) -> bool:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-        # Capture all output to prevent pollution
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
 
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                for suite in top_level_suites:
+                for suite in suites:
                     suite_results = loop.run_until_complete(
-                        run_suite(suite, {}, timeout, only_mode, None)
+                        run_suite(suite, {}, timeout, only_mode)
                     )
                     results.extend(suite_results)
         except Exception as e:
@@ -516,12 +391,10 @@ def _run_silent(suites: list[Suite], timeout: float | None = None) -> bool:
         finally:
             loop.close()
 
-    # Run in separate thread to avoid "event loop already running" error
-    thread = threading.Thread(target=worker)
+    thread = threading.Thread(target=worker, daemon=True)
     thread.start()
     thread.join()
 
-    # Check for errors from the worker thread
     if error_holder:
         import traceback
 
@@ -541,110 +414,41 @@ def _run_silent(suites: list[Suite], timeout: float | None = None) -> bool:
     return not any(r.status == TestStatus.FAILED for r in results)
 
 
-def _read_results(results_file: Path) -> list[TestResult]:
-    """Read all results from the JSONL file."""
-    results = []
-    if not results_file.exists():
-        return results
-
-    with open(results_file) as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            data = json.loads(line)
-            results.append(
-                TestResult(
-                    suite_name=data["suite"],
-                    test_name=data["test"],
-                    status=TestStatus(data["status"]),
-                    duration_ms=data["duration_ms"],
-                    error=data["error"],
-                    expected=data["expected"] if data["expected"] else MISSING,
-                    actual=data["actual"] if data["actual"] else MISSING,
-                    show_diff=data["show_diff"],
-                )
-            )
-    return results
-
-
 def _run_with_output(suites: list[Suite], timeout: float | None = None) -> bool:
-    """Run tests with normal output display using file-based result streaming."""
+    """Run tests with output display using pure async."""
     if not suites:
         print(format_summary([], 0))
         return True
 
-    # Determine if we're in "only" mode
     only_mode = any(_has_only_tests(s) for s in suites)
 
     if only_mode:
         print(f"{c.YELLOW}Running only focused tests (.only){c.RESET}\n")
 
-    # Find top-level suites (exclude those that are children of other suites)
-    nested_suite_ids = {id(child) for s in suites for child in s.children}
-    top_level_suites = [s for s in suites if id(s) not in nested_suite_ids]
+    async def run_all() -> list[TestResult]:
+        """Run all suites and print results as they complete."""
+        all_results: list[TestResult] = []
 
-    # Create temp file for results
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-        results_file = Path(f.name)
+        for suite in suites:
+            # Print suite header
+            print(f"{c.BOLD}{suite.name}{c.RESET}")
+
+            # Run suite tests
+            results = await run_suite(suite, {}, timeout, only_mode)
+
+            # Print results immediately
+            for result in results:
+                _print_result(result)
+
+            all_results.extend(results)
+
+        return all_results
 
     start_time = time.perf_counter()
-
-    # Track completion with events
-    done_events = []
-
-    # Start suite threads (1 per top-level suite)
-    suite_threads = []
-    for suite in top_level_suites:
-        done_event = threading.Event()
-        done_events.append(done_event)
-        t = threading.Thread(
-            target=_suite_worker,
-            args=(suite, {}, timeout, only_mode, results_file, done_event),
-        )
-        suite_threads.append(t)
-        t.start()
-
-    # Poll file and print new results until all threads are done
-    printed_suites: set[str] = set()
-    printed_count = 0
-
-    while not all(e.is_set() for e in done_events):
-        # Read new results
-        results = _read_results(results_file)
-
-        # Print any new results
-        for result in results[printed_count:]:
-            if result.suite_name not in printed_suites:
-                printed_suites.add(result.suite_name)
-                print(f"{c.BOLD}{result.suite_name}{c.RESET}")
-            _print_result(result)
-            printed_count += 1
-
-        time.sleep(0.05)  # 50ms poll interval
-
-    # Wait for all threads to fully complete
-    for t in suite_threads:
-        t.join()
-
-    # Final read to catch any remaining results
-    results = _read_results(results_file)
-    for result in results[printed_count:]:
-        if result.suite_name not in printed_suites:
-            printed_suites.add(result.suite_name)
-            print(f"{c.BOLD}{result.suite_name}{c.RESET}")
-        _print_result(result)
-
-    # Print failures and summary
+    results = asyncio.run(run_all())
     total_time = (time.perf_counter() - start_time) * 1000
 
     _print_failures(results)
     print(format_summary(results, total_time))
-
-    # Cleanup temp file
-    try:
-        results_file.unlink()
-    except OSError:
-        pass
 
     return not any(r.status == TestStatus.FAILED for r in results)

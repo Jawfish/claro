@@ -139,7 +139,6 @@ class SuiteDataclassTests:
 
         s = Suite(name="MySuite", cls=DummySuite)
         expect(s.tests).to_be([])
-        expect(s.children).to_be([])
 
     @test
     def suite_has_none_defaults_for_lifecycle_hooks(self) -> None:

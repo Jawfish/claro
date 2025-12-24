@@ -10,14 +10,11 @@ from .types import RunMode, Suite, Test
 _suites_lock = threading.Lock()
 _suites: list[Suite] = []
 
-# Lock for tests that need exclusive registry access across their entire execution
-# Use RLock so nested acquisition (e.g., in before_each + test) works
-_registry_test_lock = threading.RLock()
-
 
 def get_suites() -> list[Suite]:
-    """Get all registered suites."""
-    return _suites
+    """Get all registered suites (returns a copy for thread safety)."""
+    with _suites_lock:
+        return _suites.copy()
 
 
 def clear_suites() -> None:
@@ -84,7 +81,13 @@ class _TestMarker:
 
         @test.each([(1, 2, 3), (2, 3, 5)])
         def parametrized(self, a, b, expected): ...
+
+    Modifiers can be chained:
+        @test.timeout(5.0).skip
+        def slow_skipped_test(self): ...
     """
+
+    __slots__ = ("_skip", "_only", "_todo", "_skip_reason", "_timeout", "_params")
 
     def __init__(
         self,
@@ -103,6 +106,17 @@ class _TestMarker:
         self._timeout = timeout_seconds
         self._params = params
 
+    def _derive(self, **overrides: Any) -> "_TestMarker":
+        """Create a new marker preserving current state with overrides."""
+        return _TestMarker(
+            skip=overrides.get("skip", self._skip),
+            only=overrides.get("only", self._only),
+            todo=overrides.get("todo", self._todo),
+            skip_reason=overrides.get("skip_reason", self._skip_reason),
+            timeout_seconds=overrides.get("timeout_seconds", self._timeout),
+            params=overrides.get("params", self._params),
+        )
+
     def __call__(self, fn: Callable[..., Any]) -> Callable[..., Any]:
         """Apply the test marker to a function."""
         fn._is_test = True  # type: ignore[attr-defined]
@@ -117,27 +131,27 @@ class _TestMarker:
     @property
     def skip(self) -> "_TestMarker":
         """Mark test as skipped."""
-        return _TestMarker(skip=True)
+        return self._derive(skip=True)
 
     @property
     def only(self) -> "_TestMarker":
         """Mark test to run exclusively (focus mode)."""
-        return _TestMarker(only=True)
+        return self._derive(only=True)
 
     @property
     def todo(self) -> "_TestMarker":
         """Mark test as a placeholder (not implemented)."""
-        return _TestMarker(todo=True)
+        return self._derive(todo=True)
 
     def skip_if(self, condition: bool, reason: str = "") -> "_TestMarker":
         """Conditionally skip test if condition is true."""
         if condition:
-            return _TestMarker(skip=True, skip_reason=reason)
-        return _TestMarker()
+            return self._derive(skip=True, skip_reason=reason)
+        return self
 
     def timeout(self, seconds: float) -> "_TestMarker":
         """Set a timeout for this specific test."""
-        return _TestMarker(timeout_seconds=seconds)
+        return self._derive(timeout_seconds=seconds)
 
     def each(
         self, params: Sequence[tuple[Any, ...] | dict[str, Any] | Any]
@@ -160,7 +174,7 @@ class _TestMarker:
             def adds(self, a, b, expected):
                 expect(a + b).to_be(expected)
         """
-        return _TestMarker(params=list(params))
+        return self._derive(params=list(params))
 
 
 # Singleton instance
@@ -195,6 +209,26 @@ def after_all(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 
 # ============== Suite Decorator ==============
+
+
+def _create_test(
+    name: str,
+    fn: Callable[..., Any],
+    params: Any = None,
+    param_id: str | None = None,
+) -> Test:
+    """Create a Test from a decorated function, extracting its metadata."""
+    return Test(
+        name=name,
+        fn=fn,
+        skip=getattr(fn, "_skip", False),
+        only=getattr(fn, "_only", False),
+        todo=getattr(fn, "_todo", False),
+        skip_reason=getattr(fn, "_skip_reason", None),
+        timeout=getattr(fn, "_timeout", None),
+        params=params,
+        param_id=param_id,
+    )
 
 
 @overload
@@ -261,36 +295,14 @@ def suite(
                         else:
                             param_id = _generate_param_id(param_set, i)
 
-                        test_name = f"{attr_name}[{param_id}]"
-
                         s.tests.append(
-                            Test(
-                                name=test_name,
-                                fn=attr,
-                                skip=getattr(attr, "_skip", False),
-                                only=getattr(attr, "_only", False),
-                                todo=getattr(attr, "_todo", False),
-                                skip_reason=getattr(attr, "_skip_reason", None),
-                                timeout=getattr(attr, "_timeout", None),
-                                params=param_set,
-                                param_id=param_id,
+                            _create_test(
+                                f"{attr_name}[{param_id}]", attr, param_set, param_id
                             )
                         )
                 else:
-                    s.tests.append(
-                        Test(
-                            name=attr_name,
-                            fn=attr,
-                            skip=getattr(attr, "_skip", False),
-                            only=getattr(attr, "_only", False),
-                            todo=getattr(attr, "_todo", False),
-                            skip_reason=getattr(attr, "_skip_reason", None),
-                            timeout=getattr(attr, "_timeout", None),
-                        )
-                    )
+                    s.tests.append(_create_test(attr_name, attr))
 
-            elif getattr(attr, "_is_suite", False):
-                s.children.append(attr._suite_data)
             elif getattr(attr, "_is_before_each", False):
                 s.before_each = attr
             elif getattr(attr, "_is_after_each", False):
@@ -301,10 +313,6 @@ def suite(
                 s.after_all = attr
 
         cls._suite_data = s  # type: ignore[attr-defined]
-        cls._is_suite = True  # type: ignore[attr-defined]
-        # Only add top-level suites to the global registry
-        # Nested suites are already tracked via parent.children
-        # and will be removed from _suites during discovery
         with _suites_lock:
             _suites.append(s)
         return cls

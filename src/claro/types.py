@@ -1,11 +1,11 @@
 """Core type definitions for claro."""
 
+from __future__ import annotations
+
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, Callable
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable
+from typing import Any, Callable
 
 
 class _Missing:
@@ -56,7 +56,6 @@ class Suite:
     name: str
     cls: type
     tests: list[Test] = field(default_factory=list)
-    children: list["Suite"] = field(default_factory=list)
     before_each: Callable[..., Any] | None = None
     after_each: Callable[..., Any] | None = None
     before_all: Callable[..., Any] | None = None
