@@ -2,10 +2,8 @@
 
 import asyncio
 import inspect
-import io
-import threading
 import time
-from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
+from contextlib import asynccontextmanager
 from typing import Any
 
 from .output import c, format_duration, format_summary
@@ -26,7 +24,6 @@ _STATUS_CONFIG: dict[TestStatus, tuple[str, str, str]] = {
     TestStatus.PASSED: ("✓", "", "duration"),
     TestStatus.FAILED: ("✗", "name_red", "duration"),
     TestStatus.SKIPPED: ("○", "dim", "[skipped]"),
-    TestStatus.TODO: ("◌", "dim", "[todo]"),
 }
 
 
@@ -86,7 +83,6 @@ def _print_result(result: TestResult) -> None:
         TestStatus.PASSED: c.GREEN,
         TestStatus.FAILED: c.RED,
         TestStatus.SKIPPED: c.YELLOW,
-        TestStatus.TODO: c.MAGENTA,
     }
     icon = f"{icon_colors[result.status]}{icon_char}{c.RESET}"
 
@@ -143,10 +139,6 @@ async def run_single_test(
     # Handle skipped tests
     if t.skip:
         return _make_result(suite, t, TestStatus.SKIPPED, 0, error=t.skip_reason)
-
-    # Handle todo tests
-    if t.todo:
-        return _make_result(suite, t, TestStatus.TODO, 0)
 
     # Create fresh instance for this test
     instance = suite.cls()
@@ -332,15 +324,6 @@ def _has_only_tests(s: Suite) -> bool:
     return any(t.only for t in s.tests)
 
 
-def _is_inside_event_loop() -> bool:
-    """Check if we're already inside an asyncio event loop."""
-    try:
-        asyncio.get_running_loop()
-        return True
-    except RuntimeError:
-        return False
-
-
 # ============== Public API ==============
 
 
@@ -351,70 +334,6 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
     Suites run sequentially, but tests within each suite run concurrently
     via asyncio TaskGroup for maximum parallelism.
     """
-    if _is_inside_event_loop():
-        # Nested run (e.g., a test calling main()) - suppress output
-        return _run_silent(suites, timeout)
-    return _run_with_output(suites, timeout)
-
-
-def _run_silent(suites: list[Suite], timeout: float | None = None) -> bool:
-    """Run tests without any output (for nested runs).
-
-    Uses a separate thread because we may already be inside an event loop.
-    """
-    if not suites:
-        return True
-
-    only_mode = any(_has_only_tests(s) for s in suites)
-
-    results: list[TestResult] = []
-    error_holder: list[Exception] = []
-
-    def worker() -> None:
-        """Run all suites in a separate thread with its own event loop."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-
-        try:
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                for suite in suites:
-                    suite_results = loop.run_until_complete(
-                        run_suite(suite, {}, timeout, only_mode)
-                    )
-                    results.extend(suite_results)
-        except Exception as e:
-            error_holder.append(e)
-        finally:
-            loop.close()
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    thread.join()
-
-    if error_holder:
-        import traceback
-
-        e = error_holder[0]
-        tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
-        error_msg = f"Nested run crashed: {''.join(tb_lines[-3:]).strip()}"
-        results.append(
-            TestResult(
-                suite_name="<nested>",
-                test_name="<run>",
-                status=TestStatus.FAILED,
-                error=error_msg,
-                show_diff=False,
-            )
-        )
-
-    return not any(r.status == TestStatus.FAILED for r in results)
-
-
-def _run_with_output(suites: list[Suite], timeout: float | None = None) -> bool:
-    """Run tests with output display using pure async."""
     if not suites:
         print(format_summary([], 0))
         return True
