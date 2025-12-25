@@ -11,6 +11,7 @@ from .decorators import (
     suite,
     test,
 )
+from .fixtures import Inject, clear_fixtures, fixture, get_fixtures
 from .types import (
     MISSING,
     ExpectationError,
@@ -31,6 +32,11 @@ __all__ = [
     "after_each",
     "before_all",
     "after_all",
+    # Fixtures
+    "fixture",
+    "Inject",
+    "get_fixtures",
+    "clear_fixtures",
     # Registry
     "get_suites",
     "clear_suites",

@@ -3,9 +3,11 @@
 import asyncio
 import inspect
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
+from .fixtures import FixtureDef, FixtureError, get_fixtures, get_injectable_params
 from .output import c, format_duration, format_summary
 from .types import (
     MISSING,
@@ -47,6 +49,136 @@ async def timeout_context(seconds: float | None):
             yield
     except asyncio.TimeoutError:
         raise TestTimeoutError(seconds) from None
+
+
+# ============== Fixture Resolution ==============
+
+
+async def _resolve_fixture(
+    fixture_def: FixtureDef,
+    test_cache: dict[type, Any],
+    suite_cache: dict[type, Any],
+    session_cache: dict[type, Any],
+    test_cleanups: list[Callable[[], Any]],
+    suite_cleanups: list[Callable[[], Any]],
+    session_cleanups: list[Callable[[], Any]],
+) -> Any:
+    """
+    Resolve a fixture value, using cache based on scope.
+
+    Adds cleanup functions to the appropriate cleanup list based on scope.
+
+    Returns:
+        The resolved fixture value.
+    """
+    cache = {
+        "test": test_cache,
+        "suite": suite_cache,
+        "session": session_cache,
+    }[fixture_def.scope]
+
+    cleanup_list = {
+        "test": test_cleanups,
+        "suite": suite_cleanups,
+        "session": session_cleanups,
+    }[fixture_def.scope]
+
+    # Return cached value if available (cleanup already registered)
+    if fixture_def.return_type in cache:
+        return cache[fixture_def.return_type]
+
+    # Create new instance
+    cleanup: Callable[[], Any] | None = None
+
+    if fixture_def.is_generator:
+        gen = fixture_def.fn()
+        if inspect.isasyncgen(gen):
+            value = await gen.__anext__()
+
+            async def async_cleanup() -> None:
+                try:
+                    await gen.__anext__()
+                except StopAsyncIteration:
+                    pass
+
+            cleanup = async_cleanup
+        else:
+            value = next(gen)
+
+            def sync_cleanup() -> None:
+                try:
+                    next(gen)
+                except StopIteration:
+                    pass
+
+            cleanup = sync_cleanup
+    else:
+        result = fixture_def.fn()
+        if inspect.isawaitable(result):
+            value = await result
+        else:
+            value = result
+
+    cache[fixture_def.return_type] = value
+    if cleanup is not None:
+        cleanup_list.append(cleanup)
+
+    return value
+
+
+async def _resolve_all_fixtures(
+    fn: Callable[..., Any],
+    test_cache: dict[type, Any],
+    suite_cache: dict[type, Any],
+    session_cache: dict[type, Any],
+    test_cleanups: list[Callable[[], Any]],
+    suite_cleanups: list[Callable[[], Any]],
+    session_cleanups: list[Callable[[], Any]],
+) -> dict[str, Any]:
+    """
+    Resolve all fixtures for a test function.
+
+    Adds cleanup functions to the appropriate cleanup lists based on scope.
+
+    Returns:
+        Dict of resolved fixture kwargs.
+    """
+    injectable_params = get_injectable_params(fn)
+    if not injectable_params:
+        return {}
+
+    fixtures = get_fixtures()
+    resolved: dict[str, Any] = {}
+
+    for param_name, expected_type in injectable_params.items():
+        fixture_def = fixtures.get(expected_type)
+        if fixture_def is None:
+            msg = f"No fixture registered for type {expected_type.__name__}"
+            raise FixtureError(msg)
+
+        value = await _resolve_fixture(
+            fixture_def,
+            test_cache,
+            suite_cache,
+            session_cache,
+            test_cleanups,
+            suite_cleanups,
+            session_cleanups,
+        )
+        resolved[param_name] = value
+
+    return resolved
+
+
+async def _run_cleanups(cleanups: list[Callable[[], Any]]) -> None:
+    """Run all cleanup functions, ignoring errors."""
+    for cleanup in reversed(cleanups):
+        try:
+            result = cleanup()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            pass  # Cleanup errors are silently ignored
 
 
 def _make_result(
@@ -131,6 +263,10 @@ async def run_single_test(
     t: Test,
     shared_context: dict[str, Any],
     global_timeout: float | None = None,
+    suite_cache: dict[type, Any] | None = None,
+    session_cache: dict[type, Any] | None = None,
+    suite_cleanups: list[Callable[[], Any]] | None = None,
+    session_cleanups: list[Callable[[], Any]] | None = None,
 ) -> TestResult:
     """Run a single test and return its result."""
     loop = asyncio.get_running_loop()
@@ -148,7 +284,26 @@ async def run_single_test(
     timeout = t.timeout or suite.timeout or global_timeout
     result: TestResult | None = None
 
+    # Caches and cleanups for fixture scopes
+    test_cache: dict[type, Any] = {}
+    suite_cache = suite_cache if suite_cache is not None else {}
+    session_cache = session_cache if session_cache is not None else {}
+    test_cleanups: list[Callable[[], Any]] = []
+    suite_cleanups = suite_cleanups if suite_cleanups is not None else []
+    session_cleanups = session_cleanups if session_cleanups is not None else []
+
     try:
+        # Resolve fixtures before running the test
+        fixture_kwargs = await _resolve_all_fixtures(
+            t.fn,
+            test_cache,
+            suite_cache,
+            session_cache,
+            test_cleanups,
+            suite_cleanups,
+            session_cleanups,
+        )
+
         # Run before_each + test inside timeout (both should be protected)
         async with timeout_context(timeout):
             if suite.before_each:
@@ -156,16 +311,22 @@ async def run_single_test(
 
             if t.params is not None:
                 if isinstance(t.params, dict):
-                    await maybe_await(t.fn, instance, **t.params)
+                    await maybe_await(t.fn, instance, **t.params, **fixture_kwargs)
                 elif isinstance(t.params, (tuple, list)):
-                    await maybe_await(t.fn, instance, *t.params)
+                    await maybe_await(t.fn, instance, *t.params, **fixture_kwargs)
                 else:
-                    await maybe_await(t.fn, instance, t.params)
+                    await maybe_await(t.fn, instance, t.params, **fixture_kwargs)
             else:
-                await maybe_await(t.fn, instance)
+                await maybe_await(t.fn, instance, **fixture_kwargs)
 
         duration = (loop.time() - start_time) * 1000
         result = _make_result(suite, t, TestStatus.PASSED, duration)
+
+    except FixtureError as e:
+        duration = (loop.time() - start_time) * 1000
+        result = _make_result(
+            suite, t, TestStatus.FAILED, duration, error=str(e), show_diff=False
+        )
 
     except TestTimeoutError as e:
         duration = (loop.time() - start_time) * 1000
@@ -223,6 +384,9 @@ async def run_single_test(
         )
 
     finally:
+        # Run test-scoped fixture cleanups
+        await _run_cleanups(test_cleanups)
+
         # Run after_each (outside timeout, always runs for cleanup)
         if suite.after_each:
             try:
@@ -255,10 +419,22 @@ async def run_suite(
     suite: Suite,
     shared_context: dict[str, Any],
     global_timeout: float | None = None,
-) -> list[TestResult]:
-    """Run all tests in a suite."""
+    session_cache: dict[type, Any] | None = None,
+    session_cleanups: list[Callable[[], Any]] | None = None,
+) -> tuple[list[TestResult], list[Callable[[], Any]]]:
+    """Run all tests in a suite.
+
+    Returns:
+        (results, suite_cleanups) - cleanups should be run after suite completes
+    """
     results: list[TestResult] = []
     tests_to_run = suite.tests
+
+    # Suite-scoped fixture cache and cleanups
+    suite_cache: dict[type, Any] = {}
+    suite_cleanups: list[Callable[[], Any]] = []
+    session_cache = session_cache if session_cache is not None else {}
+    session_cleanups = session_cleanups if session_cleanups is not None else []
 
     # Run before_all
     if suite.before_all:
@@ -272,7 +448,16 @@ async def run_suite(
                 async with asyncio.TaskGroup() as tg:
                     for t in tests_to_run:
                         task = tg.create_task(
-                            run_single_test(suite, t, shared_context, global_timeout)
+                            run_single_test(
+                                suite,
+                                t,
+                                shared_context,
+                                global_timeout,
+                                suite_cache,
+                                session_cache,
+                                suite_cleanups,
+                                session_cleanups,
+                            )
                         )
                         tasks[task] = t
                 # All tasks completed successfully
@@ -298,7 +483,16 @@ async def run_suite(
         else:
             # Single test - run directly
             for t in tests_to_run:
-                result = await run_single_test(suite, t, shared_context, global_timeout)
+                result = await run_single_test(
+                    suite,
+                    t,
+                    shared_context,
+                    global_timeout,
+                    suite_cache,
+                    session_cache,
+                    suite_cleanups,
+                    session_cleanups,
+                )
                 results.append(result)
 
     finally:
@@ -306,7 +500,7 @@ async def run_suite(
         if suite.after_all:
             await maybe_await(suite.after_all, shared_context)
 
-    return results
+    return results, suite_cleanups
 
 
 # ============== Public API ==============
@@ -326,19 +520,30 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
     async def run_all() -> list[TestResult]:
         """Run all suites and print results as they complete."""
         all_results: list[TestResult] = []
+        session_cache: dict[type, Any] = {}
+        session_cleanups: list[Callable[[], Any]] = []
 
-        for suite in suites:
-            # Print suite header
-            print(f"{c.BOLD}{suite.name}{c.RESET}")
+        try:
+            for suite in suites:
+                # Print suite header
+                print(f"{c.BOLD}{suite.name}{c.RESET}")
 
-            # Run suite tests
-            results = await run_suite(suite, {}, timeout)
+                # Run suite tests
+                results, suite_cleanups = await run_suite(
+                    suite, {}, timeout, session_cache, session_cleanups
+                )
 
-            # Print results immediately
-            for result in results:
-                _print_result(result)
+                # Run suite-scoped fixture cleanups
+                await _run_cleanups(suite_cleanups)
 
-            all_results.extend(results)
+                # Print results immediately
+                for result in results:
+                    _print_result(result)
+
+                all_results.extend(results)
+        finally:
+            # Run session-scoped fixture cleanups
+            await _run_cleanups(session_cleanups)
 
         return all_results
 
