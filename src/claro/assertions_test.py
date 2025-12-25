@@ -474,30 +474,24 @@ class AsyncExceptionTests:
         await expect(raises_async).to_raise(ValueError)
 
     @test
-    async def async_missing_exception_fails(self):
+    def async_missing_exception_fails(self):
         async def no_raise():
             pass
 
-        raised = False
-        try:
+        async def should_fail():
             await expect(no_raise).to_raise(ValueError)
-        except ExpectationError:
-            raised = True
 
-        expect(raised).to_be(True)
+        expect(should_fail).to_raise(ExpectationError)
 
     @test
-    async def async_wrong_exception_type_fails(self):
+    def async_wrong_exception_type_fails(self):
         async def raises_type_error():
             raise TypeError("wrong type")
 
-        raised = False
-        try:
+        async def should_fail():
             await expect(raises_type_error).to_raise(ValueError)
-        except ExpectationError:
-            raised = True
 
-        expect(raised).to_be(True)
+        expect(should_fail).to_raise(ExpectationError)
 
     @test
     async def sync_function_in_async_context_works(self):

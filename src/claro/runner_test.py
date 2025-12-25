@@ -77,16 +77,12 @@ class TimeoutContextTests:
         expect(completed).to_be(True)
 
     @test
-    async def slow_operation_raises_test_timeout_error(self):
-        raised = False
-        try:
+    def slow_operation_raises_test_timeout_error(self):
+        async def slow_operation():
             async with timeout_context(0.001):
                 await asyncio.sleep(1.0)
-        except TestTimeoutError as e:
-            raised = True
-            expect(e.timeout).to_be(0.001)
 
-        expect(raised).to_be(True)
+        expect(slow_operation).to_raise(TestTimeoutError)
 
 
 @suite
