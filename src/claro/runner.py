@@ -108,41 +108,16 @@ async def timeout_context(seconds: float | None):
 
 # ============== Fixture Resolution ==============
 
+# Per-fixture-type locks to prevent races when resolving shared-scope fixtures
+_fixture_locks: dict[type, asyncio.Lock] = {}
 
-async def _resolve_fixture(
+
+async def _resolve_fixture_impl(
     fixture_def: FixtureDef,
-    test_cache: dict[type, Any],
-    suite_cache: dict[type, Any],
-    session_cache: dict[type, Any],
-    test_cleanups: list[Callable[[], Any]],
-    suite_cleanups: list[Callable[[], Any]],
-    session_cleanups: list[Callable[[], Any]],
+    cache: dict[type, Any],
+    cleanup_list: list[Callable[[], Any]],
 ) -> Any:
-    """
-    Resolve a fixture value, using cache based on scope.
-
-    Adds cleanup functions to the appropriate cleanup list based on scope.
-
-    Returns:
-        The resolved fixture value.
-    """
-    cache = {
-        "test": test_cache,
-        "suite": suite_cache,
-        "session": session_cache,
-    }[fixture_def.scope]
-
-    cleanup_list = {
-        "test": test_cleanups,
-        "suite": suite_cleanups,
-        "session": session_cleanups,
-    }[fixture_def.scope]
-
-    # Return cached value if available (cleanup already registered)
-    if fixture_def.return_type in cache:
-        return cache[fixture_def.return_type]
-
-    # Create new instance
+    """Actually resolve a fixture value and cache it."""
     cleanup: Callable[[], Any] | None = None
 
     if fixture_def.is_generator:
@@ -179,6 +154,56 @@ async def _resolve_fixture(
         cleanup_list.append(cleanup)
 
     return value
+
+
+async def _resolve_fixture(
+    fixture_def: FixtureDef,
+    test_cache: dict[type, Any],
+    suite_cache: dict[type, Any],
+    session_cache: dict[type, Any],
+    test_cleanups: list[Callable[[], Any]],
+    suite_cleanups: list[Callable[[], Any]],
+    session_cleanups: list[Callable[[], Any]],
+) -> Any:
+    """
+    Resolve a fixture value, using cache based on scope.
+
+    Adds cleanup functions to the appropriate cleanup list based on scope.
+    Uses locking for shared scopes (suite, session) to prevent races.
+
+    Returns:
+        The resolved fixture value.
+    """
+    cache = {
+        "test": test_cache,
+        "suite": suite_cache,
+        "session": session_cache,
+    }[fixture_def.scope]
+
+    cleanup_list = {
+        "test": test_cleanups,
+        "suite": suite_cleanups,
+        "session": session_cleanups,
+    }[fixture_def.scope]
+
+    # Fast path: already cached
+    if fixture_def.return_type in cache:
+        return cache[fixture_def.return_type]
+
+    # Test scope has per-test cache, no race possible
+    if fixture_def.scope == "test":
+        return await _resolve_fixture_impl(fixture_def, cache, cleanup_list)
+
+    # Suite/session scopes are shared - use locking to prevent races
+    # setdefault is atomic, so only one lock per type is created
+    lock = _fixture_locks.setdefault(fixture_def.return_type, asyncio.Lock())
+
+    async with lock:
+        # Double-check cache (another task may have resolved while we waited)
+        if fixture_def.return_type in cache:
+            return cache[fixture_def.return_type]
+
+        return await _resolve_fixture_impl(fixture_def, cache, cleanup_list)
 
 
 async def _resolve_all_fixtures(
