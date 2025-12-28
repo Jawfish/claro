@@ -672,7 +672,7 @@ def run(
                 all_results.extend(results)
 
         except* Exception:
-            # Handle partial completion - collect what we can
+            # Handle partial completion - collect results and report failures
             for suite, task in zip(suites, tasks):
                 if task.done() and not task.cancelled():
                     try:
@@ -681,8 +681,25 @@ def run(
                         for result in results:
                             _print_result(result)
                         all_results.extend(results)
-                    except Exception:
-                        pass  # Skip suites that failed to complete
+                    except Exception as e:
+                        # Suite failed to execute - report as a failed result
+                        import traceback
+
+                        tb_lines = traceback.format_exception(
+                            type(e), e, e.__traceback__
+                        )
+                        error_msg = "".join(tb_lines[-3:]).strip()
+                        print(f"{c.BOLD}{suite.name}{c.RESET}")
+                        failed_result = TestResult(
+                            suite_name=suite.name,
+                            test_name="(suite setup)",
+                            status=TestStatus.FAILED,
+                            duration_ms=0,
+                            error=error_msg,
+                            show_diff=False,
+                        )
+                        _print_result(failed_result)
+                        all_results.append(failed_result)
 
         finally:
             # Run session-scoped fixture cleanups
