@@ -531,8 +531,14 @@ async def run_suite(
     session_cache: dict[type, Any] | None = None,
     session_cleanups: list[Callable[[], Any]] | None = None,
     capture: bool = True,
+    *,
+    run_lifecycle: bool = True,
 ) -> tuple[list[TestResult], list[Callable[[], Any]]]:
     """Run all tests in a suite.
+
+    Args:
+        run_lifecycle: If True (default), run before_all/after_all hooks.
+            Set to False when lifecycle hooks are managed externally.
 
     Returns:
         (results, suite_cleanups) - cleanups should be run after suite completes
@@ -546,8 +552,8 @@ async def run_suite(
     session_cache = session_cache if session_cache is not None else {}
     session_cleanups = session_cleanups if session_cleanups is not None else []
 
-    # Run before_all
-    if suite.before_all:
+    # Run before_all (if managing lifecycle internally)
+    if run_lifecycle and suite.before_all:
         await maybe_await(suite.before_all, shared_context)
 
     try:
@@ -608,8 +614,8 @@ async def run_suite(
                 results.append(result)
 
     finally:
-        # Run after_all
-        if suite.after_all:
+        # Run after_all (if managing lifecycle internally)
+        if run_lifecycle and suite.after_all:
             await maybe_await(suite.after_all, shared_context)
 
     return results, suite_cleanups
@@ -639,7 +645,7 @@ def run(
         sys.stderr = CapturingWriter(original_stderr, _stderr_buffer)
 
     async def run_all() -> list[TestResult]:
-        """Run all suites in parallel and print results after completion."""
+        """Run all suites with sequential lifecycle hooks and parallel tests."""
         # Clear fixture locks from previous runs (locks are tied to event loops)
         _fixture_locks.clear()
 
@@ -647,63 +653,117 @@ def run(
         session_cache: dict[type, Any] = {}
         session_cleanups: list[Callable[[], Any]] = []
 
-        async def run_one_suite(s: Suite) -> list[TestResult]:
-            """Run a single suite and its cleanups."""
+        # Create shared contexts for each suite (indexed by position)
+        suite_contexts: list[dict[str, Any]] = [{} for _ in suites]
+        suite_cleanups_list: list[list[Callable[[], Any]]] = [[] for _ in suites]
+        failed_indices: dict[
+            int, str
+        ] = {}  # Indices of suites that failed during before_all
+
+        # Phase 1: Run all before_all hooks SEQUENTIALLY to prevent races
+        # This ensures module-level initialization completes before parallel execution
+        for i, suite in enumerate(suites):
+            if suite.before_all:
+                try:
+                    await maybe_await(suite.before_all, suite_contexts[i])
+                except Exception as e:
+                    import traceback
+
+                    tb_lines = traceback.format_exception(type(e), e, e.__traceback__)
+                    failed_indices[i] = "".join(tb_lines[-3:]).strip()
+
+        async def run_one_suite(idx: int, s: Suite) -> list[TestResult]:
+            """Run a single suite's tests (lifecycle hooks managed externally)."""
             results, s_cleanups = await run_suite(
-                s, {}, timeout, session_cache, session_cleanups, capture
+                s,
+                suite_contexts[idx],
+                timeout,
+                session_cache,
+                session_cleanups,
+                capture,
+                run_lifecycle=False,  # Lifecycle managed here
             )
-            # Run suite-scoped cleanups immediately after suite completes
-            await _run_cleanups(s_cleanups)
+            suite_cleanups_list[idx] = s_cleanups
             return results
 
+        # Separate suites that can run from those that failed during setup
+        runnable_indices = [i for i in range(len(suites)) if i not in failed_indices]
+        suite_results: dict[int, list[TestResult]] = {}
+
         try:
-            # Run all suites in parallel
+            # Phase 2: Run all suite TESTS in parallel (only for suites that passed setup)
             tasks: list[asyncio.Task[list[TestResult]]] = []
             async with asyncio.TaskGroup() as tg:
-                for suite in suites:
-                    tasks.append(tg.create_task(run_one_suite(suite)))
+                for i in runnable_indices:
+                    tasks.append(tg.create_task(run_one_suite(i, suites[i])))
 
-            # Print results in original suite order after all complete
-            for suite, task in zip(suites, tasks):
-                print(f"{c.BOLD}{suite.name}{c.RESET}")
-                results = task.result()
-                for result in results:
-                    _print_result(result)
-                all_results.extend(results)
+            # Collect results from parallel execution
+            for i, task in zip(runnable_indices, tasks):
+                suite_results[i] = task.result()
 
         except* Exception:
-            # Handle partial completion - collect results and report failures
-            for suite, task in zip(suites, tasks):
+            # Handle partial completion - collect what we can
+            for i, task in zip(runnable_indices, tasks):
                 if task.done() and not task.cancelled():
                     try:
-                        results = task.result()
-                        print(f"{c.BOLD}{suite.name}{c.RESET}")
-                        for result in results:
-                            _print_result(result)
-                        all_results.extend(results)
+                        suite_results[i] = task.result()
                     except Exception as e:
-                        # Suite failed to execute - report as a failed result
+                        # Test execution failed - create failure result
                         import traceback
 
                         tb_lines = traceback.format_exception(
                             type(e), e, e.__traceback__
                         )
                         error_msg = "".join(tb_lines[-3:]).strip()
-                        print(f"{c.BOLD}{suite.name}{c.RESET}")
-                        failed_result = TestResult(
-                            suite_name=suite.name,
-                            test_name="(suite setup)",
-                            status=TestStatus.FAILED,
-                            duration_ms=0,
-                            error=error_msg,
-                            show_diff=False,
-                        )
-                        _print_result(failed_result)
-                        all_results.append(failed_result)
+                        suite_results[i] = [
+                            TestResult(
+                                suite_name=suites[i].name,
+                                test_name="(test execution)",
+                                status=TestStatus.FAILED,
+                                duration_ms=0,
+                                error=error_msg,
+                                show_diff=False,
+                            )
+                        ]
 
         finally:
+            # Phase 3: Run all after_all hooks SEQUENTIALLY
+            for i, suite in enumerate(suites):
+                if suite.after_all:
+                    try:
+                        await maybe_await(suite.after_all, suite_contexts[i])
+                    except Exception:
+                        pass  # Don't let after_all failures mask test results
+
+            # Run suite-scoped fixture cleanups
+            for i in range(len(suites)):
+                if suite_cleanups_list[i]:
+                    await _run_cleanups(suite_cleanups_list[i])
+
             # Run session-scoped fixture cleanups
             await _run_cleanups(session_cleanups)
+
+        # Print all results in original suite order
+        for i, suite in enumerate(suites):
+            print(f"{c.BOLD}{suite.name}{c.RESET}")
+
+            if i in failed_indices:
+                # Suite failed during before_all
+                failed_result = TestResult(
+                    suite_name=suite.name,
+                    test_name="(before_all)",
+                    status=TestStatus.FAILED,
+                    duration_ms=0,
+                    error=failed_indices[i],
+                    show_diff=False,
+                )
+                _print_result(failed_result)
+                all_results.append(failed_result)
+            elif i in suite_results:
+                # Suite ran successfully (or partially)
+                for result in suite_results[i]:
+                    _print_result(result)
+                all_results.extend(suite_results[i])
 
         return all_results
 
