@@ -2,9 +2,12 @@
 
 import asyncio
 import inspect
+import io
+import sys
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from .fixtures import FixtureDef, FixtureError, get_fixtures, get_injectable_params
@@ -18,6 +21,58 @@ from .types import (
     TestStatus,
     TestTimeoutError,
 )
+
+
+# ============== Output Capture ==============
+
+# Context variables for per-task capture buffers
+_stdout_buffer: ContextVar[io.StringIO | None] = ContextVar(
+    "stdout_buffer", default=None
+)
+_stderr_buffer: ContextVar[io.StringIO | None] = ContextVar(
+    "stderr_buffer", default=None
+)
+
+
+class CapturingWriter:
+    """Routes writes to context-local buffer or original stream."""
+
+    def __init__(self, original: Any, buffer_var: ContextVar[io.StringIO | None]):
+        self._original = original
+        self._buffer_var = buffer_var
+
+    def write(self, s: str) -> int:
+        buf = self._buffer_var.get()
+        if buf is not None:
+            return buf.write(s)
+        return self._original.write(s)
+
+    def flush(self) -> None:
+        self._original.flush()
+
+    def isatty(self) -> bool:
+        return self._original.isatty()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._original, name)
+
+
+def _start_capture() -> None:
+    """Start capturing stdout/stderr for the current async task."""
+    _stdout_buffer.set(io.StringIO())
+    _stderr_buffer.set(io.StringIO())
+
+
+def _stop_capture() -> tuple[str, str]:
+    """Stop capturing and return (stdout, stderr) content."""
+    stdout_buf = _stdout_buffer.get()
+    stderr_buf = _stderr_buffer.get()
+    _stdout_buffer.set(None)
+    _stderr_buffer.set(None)
+    return (
+        stdout_buf.getvalue() if stdout_buf else "",
+        stderr_buf.getvalue() if stderr_buf else "",
+    )
 
 
 # Status display configuration: (icon, name_color, status_suffix_fn)
@@ -191,6 +246,8 @@ def _make_result(
     expected: Any = MISSING,
     actual: Any = MISSING,
     show_diff: bool = True,
+    captured_stdout: str = "",
+    captured_stderr: str = "",
 ) -> TestResult:
     """Create a TestResult with common fields pre-filled."""
     return TestResult(
@@ -202,6 +259,8 @@ def _make_result(
         expected=expected,
         actual=actual,
         show_diff=show_diff,
+        captured_stdout=captured_stdout,
+        captured_stderr=captured_stderr,
     )
 
 
@@ -255,6 +314,18 @@ def _print_failures(results: list[TestResult]) -> None:
         ):
             print(f"    {c.RED}- Expected: {result.expected!r}{c.RESET}")
             print(f"    {c.GREEN}+ Actual:   {result.actual!r}{c.RESET}")
+
+        # Show captured output for failed tests
+        if result.captured_stdout:
+            print(f"\n    {c.DIM}--- Captured stdout ---{c.RESET}")
+            for line in result.captured_stdout.splitlines():
+                print(f"    {line}")
+
+        if result.captured_stderr:
+            print(f"\n    {c.DIM}--- Captured stderr ---{c.RESET}")
+            for line in result.captured_stderr.splitlines():
+                print(f"    {line}")
+
         print()
 
 
@@ -267,6 +338,7 @@ async def run_single_test(
     session_cache: dict[type, Any] | None = None,
     suite_cleanups: list[Callable[[], Any]] | None = None,
     session_cleanups: list[Callable[[], Any]] | None = None,
+    capture: bool = True,
 ) -> TestResult:
     """Run a single test and return its result."""
     loop = asyncio.get_running_loop()
@@ -275,6 +347,10 @@ async def run_single_test(
     # Handle skipped tests
     if t.skip:
         return _make_result(suite, t, TestStatus.SKIPPED, 0, error=t.skip_reason)
+
+    # Start output capture for this task
+    if capture:
+        _start_capture()
 
     # Create fresh instance for this test
     instance = suite.cls()
@@ -384,6 +460,12 @@ async def run_single_test(
         )
 
     finally:
+        # Stop capture and get output
+        if capture:
+            captured_stdout, captured_stderr = _stop_capture()
+        else:
+            captured_stdout, captured_stderr = "", ""
+
         # Run test-scoped fixture cleanups
         await _run_cleanups(test_cleanups)
 
@@ -412,6 +494,8 @@ async def run_single_test(
                     )
 
     assert result is not None
+    result.captured_stdout = captured_stdout
+    result.captured_stderr = captured_stderr
     return result
 
 
@@ -421,6 +505,7 @@ async def run_suite(
     global_timeout: float | None = None,
     session_cache: dict[type, Any] | None = None,
     session_cleanups: list[Callable[[], Any]] | None = None,
+    capture: bool = True,
 ) -> tuple[list[TestResult], list[Callable[[], Any]]]:
     """Run all tests in a suite.
 
@@ -457,6 +542,7 @@ async def run_suite(
                                 session_cache,
                                 suite_cleanups,
                                 session_cleanups,
+                                capture,
                             )
                         )
                         tasks[task] = t
@@ -492,6 +578,7 @@ async def run_suite(
                     session_cache,
                     suite_cleanups,
                     session_cleanups,
+                    capture,
                 )
                 results.append(result)
 
@@ -506,7 +593,9 @@ async def run_suite(
 # ============== Public API ==============
 
 
-def run(suites: list[Suite], timeout: float | None = None) -> bool:
+def run(
+    suites: list[Suite], timeout: float | None = None, *, capture: bool = True
+) -> bool:
     """
     Run all test suites.
 
@@ -517,30 +606,56 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
         print(format_summary([], 0))
         return True
 
+    # Install capturing writers if capture is enabled
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    if capture:
+        sys.stdout = CapturingWriter(original_stdout, _stdout_buffer)
+        sys.stderr = CapturingWriter(original_stderr, _stderr_buffer)
+
     async def run_all() -> list[TestResult]:
-        """Run all suites and print results as they complete."""
+        """Run all suites in parallel and print results after completion."""
         all_results: list[TestResult] = []
         session_cache: dict[type, Any] = {}
         session_cleanups: list[Callable[[], Any]] = []
 
+        async def run_one_suite(s: Suite) -> list[TestResult]:
+            """Run a single suite and its cleanups."""
+            results, s_cleanups = await run_suite(
+                s, {}, timeout, session_cache, session_cleanups, capture
+            )
+            # Run suite-scoped cleanups immediately after suite completes
+            await _run_cleanups(s_cleanups)
+            return results
+
         try:
-            for suite in suites:
-                # Print suite header
+            # Run all suites in parallel
+            tasks: list[asyncio.Task[list[TestResult]]] = []
+            async with asyncio.TaskGroup() as tg:
+                for suite in suites:
+                    tasks.append(tg.create_task(run_one_suite(suite)))
+
+            # Print results in original suite order after all complete
+            for suite, task in zip(suites, tasks):
                 print(f"{c.BOLD}{suite.name}{c.RESET}")
-
-                # Run suite tests
-                results, suite_cleanups = await run_suite(
-                    suite, {}, timeout, session_cache, session_cleanups
-                )
-
-                # Run suite-scoped fixture cleanups
-                await _run_cleanups(suite_cleanups)
-
-                # Print results immediately
+                results = task.result()
                 for result in results:
                     _print_result(result)
-
                 all_results.extend(results)
+
+        except* Exception:
+            # Handle partial completion - collect what we can
+            for suite, task in zip(suites, tasks):
+                if task.done() and not task.cancelled():
+                    try:
+                        results = task.result()
+                        print(f"{c.BOLD}{suite.name}{c.RESET}")
+                        for result in results:
+                            _print_result(result)
+                        all_results.extend(results)
+                    except Exception:
+                        pass  # Skip suites that failed to complete
+
         finally:
             # Run session-scoped fixture cleanups
             await _run_cleanups(session_cleanups)
@@ -548,7 +663,14 @@ def run(suites: list[Suite], timeout: float | None = None) -> bool:
         return all_results
 
     start_time = time.perf_counter()
-    results = asyncio.run(run_all())
+    try:
+        results = asyncio.run(run_all())
+    finally:
+        # Restore original stdout/stderr
+        if capture:
+            sys.stdout = original_stdout
+            sys.stderr = original_stderr
+
     total_time = (time.perf_counter() - start_time) * 1000
 
     _print_failures(results)

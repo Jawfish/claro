@@ -65,6 +65,8 @@ class TestResult:
     expected: Any = field(default_factory=lambda: MISSING)
     actual: Any = field(default_factory=lambda: MISSING)
     show_diff: bool = True
+    captured_stdout: str = ""
+    captured_stderr: str = ""
 
 
 class ExpectationError(AssertionError):

@@ -47,6 +47,12 @@ def create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force colored output",
     )
+    parser.add_argument(
+        "-s",
+        "--no-capture",
+        action="store_true",
+        help="Don't capture stdout/stderr (show output immediately)",
+    )
     return parser
 
 
@@ -97,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Run tests
-    success = runner.run(suites, timeout=args.timeout)
+    success = runner.run(suites, timeout=args.timeout, capture=not args.no_capture)
 
     return 0 if success else 1
 
