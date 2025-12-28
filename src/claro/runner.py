@@ -640,6 +640,9 @@ def run(
 
     async def run_all() -> list[TestResult]:
         """Run all suites in parallel and print results after completion."""
+        # Clear fixture locks from previous runs (locks are tied to event loops)
+        _fixture_locks.clear()
+
         all_results: list[TestResult] = []
         session_cache: dict[type, Any] = {}
         session_cleanups: list[Callable[[], Any]] = []
