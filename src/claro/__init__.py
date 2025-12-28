@@ -12,6 +12,7 @@ from .decorators import (
     test,
 )
 from .fixtures import Inject, clear_fixtures, fixture, get_fixtures
+from .narrowing import narrow, require
 from .types import (
     MISSING,
     ExpectationError,
@@ -43,6 +44,9 @@ __all__ = [
     # Assertions
     "expect",
     "Expectation",
+    # Narrowing
+    "require",
+    "narrow",
     # Types
     "Suite",
     "Test",
